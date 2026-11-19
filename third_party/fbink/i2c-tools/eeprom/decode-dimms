@@ -17,11 +17,6 @@
 #    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #    GNU General Public License for more details.
 #
-#    You should have received a copy of the GNU General Public License
-#    along with this program; if not, write to the Free Software
-#    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
-#    MA 02110-1301 USA.
-#
 # A kernel driver must be loaded (unless option -x is used). Up to DDR3,
 # you need either the at24 driver (in the kernel tree since v2.6.27) or
 # the legacy eeprom driver (in the kernel tree since v2.6.0). For kernels
@@ -35,7 +30,7 @@
 # 1997,1999, Rev 1.2B
 #
 # Jedec Standards 4.1.x & 4.5.x
-# http://www.jedec.org
+# https://www.jedec.org/
 #
 
 require 5.004;
@@ -50,7 +45,7 @@ use vars qw($opt_html $opt_bodyonly $opt_side_by_side $opt_merge
 
 use constant LITTLEENDIAN	=> "little-endian";
 use constant BIGENDIAN		=> "big-endian";
-use constant I2C_TOOLS_VER	=> "4.3";
+use constant I2C_TOOLS_VER	=> "4.4";
 
 @vendors = (
 ["AMD", "AMI", "Fairchild", "Fujitsu",

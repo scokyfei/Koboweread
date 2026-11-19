@@ -228,13 +228,36 @@ end
 -- Edge swipes in Android set the light behind KOReader's back, and KOReader
 -- keeps its own copy of brightness and warmth: take the hardware values over
 -- on return, so its menus show them and its next change starts from them.
+local function readWhite()
+    local fs = Device.frontlight_settings or {}
+    return tonumber((read(fs.frontlight_white or "/sys/class/backlight/mxc_msp430.0/brightness") or ""):match("%d+"))
+end
+-- Hardware brightness when Android took the screen (rememberFrontlight), so
+-- that a light nobody changed in Android leaves KOReader's state alone.
+local white_at_launch
+local function rememberFrontlight()
+    white_at_launch = Device:hasFrontlight() and readWhite() or nil
+end
 local function syncFrontlight()
     if not Device:hasFrontlight() then return end
     local powerd = Device:getPowerDevice()
     local fs = Device.frontlight_settings or {}
-    local white = tonumber((read(fs.frontlight_white or "/sys/class/backlight/mxc_msp430.0/brightness") or ""):match("%d+"))
+    local white = readWhite()
     local before = powerd:frontlightIntensity()
-    if white and white ~= before then powerd:setIntensity(white) end
+    local launched_with = white_at_launch
+    white_at_launch = nil
+    -- Koboweread-Colour: a light that is merely off reads 0. Setting the
+    -- intensity to 0 lost the remembered level, and KOReader then saved 0 (also
+    -- into Nickel's FrontLightLevel), so turning the light on stayed dark.
+    -- 0 now means "off" (level kept), and an unchanged light is left alone.
+    if white and white ~= launched_with then
+        if white == 0 then
+            if powerd:isFrontlightOn() then powerd:turnOffFrontlight() end
+        else
+            if white ~= before then powerd:setIntensity(white) end
+            if not powerd:isFrontlightOn() then powerd:turnOnFrontlight() end
+        end
+    end
     local mixer = Device:hasNaturalLight() and fs.frontlight_mixer and fs.nl_max
         and tonumber((read(fs.frontlight_mixer) or ""):match("%d+"))
     local warmth = powerd:frontlightWarmth()
@@ -336,9 +359,28 @@ function WeReadLab:onResume()
         end
     end)
 end
+-- Koboweread-Colour: "微信读书" on the Kobo home screen (NickelMenu, see
+-- nickelmenu-weread) leaves a one-shot request and starts KOReader; open the
+-- launcher once KOReader is up and online. A request older than two minutes
+-- (KOReader did not get this far last time) is dropped.
+local autostart_request = "/tmp/wereadkobo-autostart"
+local function takeAutostart()
+    local lfs = require("libs/libkoreader-lfs")
+    local made = lfs.attributes(autostart_request, "modification")
+    if not made then return false end
+    os.remove(autostart_request)
+    return os.time() - made <= 120
+end
 function WeReadLab:init()
     self.ui.menu:registerToMainMenu(self)
     if controllerAlive() and stage() ~= "background" then self:holdAwake(0) end
+    if takeAutostart() then
+        logger.info("WeReadLab197 autostart requested from the Kobo home screen")
+        UIManager:scheduleIn(1, function()
+            local NetworkMgr = require("ui/network/manager")
+            NetworkMgr:runWhenOnline(function() self:openResident() end)
+        end)
+    end
 end
 -- KOReader stays in memory, stopped, while Android runs (no swap, 507 MB).
 -- Drop its rendered-page cache and collect garbage first, so the memory goes
@@ -459,6 +501,7 @@ function WeReadLab:openResident(tuning)
     end
     stopOther()
     freeReaderMemory()
+    rememberFrontlight()
     local state = residentState()
     if state == "background" then
         if os.execute("/bin/sh " .. ctl .. " foreground </dev/null >/dev/null 2>&1") == 0 then

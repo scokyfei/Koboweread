@@ -12,7 +12,9 @@ r=/tmp/kobo-android-runtime
 base=/mnt/onboard/.adds/kobo-android-lab
 # Modules from the per-kernel set (run-resident-session.sh); none: refuse.
 kmods=$base/kernels/$(uname -r)
-for m in ashmem_linux kobo_madvise;do
+# Built-in ashmem (Libra Colour, MTK 4.9): the module set has no ashmem_linux.ko.
+ashmem_mod=ashmem_linux;[ -f "$kmods/ashmem_linux.ko" ] || { [ -e /sys/class/misc/ashmem ] && ashmem_mod=; }
+for m in $ashmem_mod kobo_madvise;do
  [ -f "$kmods/$m.ko" ] && [ ! -L "$kmods/$m.ko" ] && [ "$(sha256sum "$kmods/$m.ko" | awk '{print $1}')" = "$(awk -v n="$m.ko" '$2==n {print $1}' "$kmods/SHA256SUMS" 2>/dev/null)" ] || { echo "KERNEL_MODULES_MISSING release=$(uname -r) module=$m";exit 2; }
 done
 # WeRead 1.9.7 only (graphics-v197.img), kept apart from fast/ (1.9.8) and fast-v188/ (1.8.8).
@@ -89,7 +91,9 @@ loopdev=$(awk -v root="$r" '$2==root {print $1}' /proc/mounts)
 appdir=$(cd "$r" && ls -d data/app/$pkg-* 2>/dev/null | head -n 1)
 [ -n "$appdir" ] || { echo FAST_COMPILE_APK_MISSING;exit 6; }
 apk=/$appdir/base.apk
-[ "$(sha256sum "$r$apk" | cut -d' ' -f1)" = "$apk_sha" ] || { echo FAST_COMPILE_APK_HASH_MISMATCH;exit 6; }
+apk_have=$(sha256sum "$r$apk" | cut -d' ' -f1)
+# Koboweread-Colour: the official channel-900 1.9.7 build is accepted as well.
+[ "$apk_have" = "$apk_sha" ] || { [ "$apk_sha" = 351105bda1ac58bc037c2d604982635a24018eb0f9b9964abeb5b84647565f1c ] && [ "$apk_have" = fae543b19c935024d5f51ac0d42df00bc6ebb5de2fc197b51bb3131e3b16707d ]; } || { echo FAST_COMPILE_APK_HASH_MISMATCH;exit 6; }
 mkdir -p "$r/lab/fast"
 prof=$r/data/misc/profiles/cur/0/$pkg/primary.prof
 [ -s "$prof" ] || { echo FAST_COMPILE_NO_PROFILE;exit 7; }
@@ -103,7 +107,7 @@ if [ -f "$r$out" ] && [ -f "$r$out.sha256" ];then
 fi
 rm -f "$r$out" "$r$out.sha256" "$r$out.new"
 [ "$(df -Pk "$r" | awk 'NR==2 {print $4}')" -ge 250000 ] || { echo FAST_COMPILE_LOW_IMAGE_SPACE;exit 8; }
-insmod "$kmods/ashmem_linux.ko";ash=1
+[ -z "$ashmem_mod" ] || { insmod "$kmods/ashmem_linux.ko";ash=1; }
 insmod "$kmods/kobo_madvise.ko";vm=1
 for n in ashmem kobo_madvise;do
  dev=$(cat /sys/class/misc/$n/dev);rm -f "$r/dev/$n";mknod "$r/dev/$n" c "${dev%:*}" "${dev#*:}";chmod 0600 "$r/dev/$n"

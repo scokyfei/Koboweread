@@ -105,29 +105,29 @@ size_t
 		switch (nb) {
 			// fall through
 			case 5:
-				ch += (unsigned char) *src++;
+				ch  += (unsigned char) *src++;
 				ch <<= 6U;
 			// fall through
 			case 4:
-				ch += (unsigned char) *src++;
+				ch  += (unsigned char) *src++;
 				ch <<= 6U;
 			// fall through
 			case 3:
-				ch += (unsigned char) *src++;
+				ch  += (unsigned char) *src++;
 				ch <<= 6U;
 			// fall through
 			case 2:
-				ch += (unsigned char) *src++;
+				ch  += (unsigned char) *src++;
 				ch <<= 6U;
 			// fall through
 			case 1:
-				ch += (unsigned char) *src++;
+				ch  += (unsigned char) *src++;
 				ch <<= 6U;
 			// fall through
 			case 0:
 				ch += (unsigned char) *src++;
 		}
-		ch -= offsetsFromUTF8[nb];
+		ch       -= offsetsFromUTF8[nb];
 		dest[i++] = ch;
 	}
 	return i;
@@ -330,29 +330,29 @@ size_t
 			switch (nb) {
 				// fall through
 				case 5:
-					ch += (unsigned char) *s++;
+					ch  += (unsigned char) *s++;
 					ch <<= 6U;
 				// fall through
 				case 4:
-					ch += (unsigned char) *s++;
+					ch  += (unsigned char) *s++;
 					ch <<= 6U;
 				// fall through
 				case 3:
-					ch += (unsigned char) *s++;
+					ch  += (unsigned char) *s++;
 					ch <<= 6U;
 				// fall through
 				case 2:
-					ch += (unsigned char) *s++;
+					ch  += (unsigned char) *s++;
 					ch <<= 6U;
 				// fall through
 				case 1:
-					ch += (unsigned char) *s++;
+					ch  += (unsigned char) *s++;
 					ch <<= 6U;
 				// fall through
 				case 0:
 					ch += (unsigned char) *s++;
 			}
-			ch -= offsetsFromUTF8[nb];
+			ch   -= offsetsFromUTF8[nb];
 			int w = wcwidth(
 			    (wchar_t) ch);    // might return -1, locale-dependent (Julia now uses utf8proc_charwidth)
 			if (w > 0) {
@@ -374,7 +374,7 @@ uint32_t
 	size_t sz = u8_seqlen(&s[*i]);
 	for (size_t j = sz; j > 0; j--) {
 		ch <<= 6U;
-		ch += (unsigned char) s[(*i)++];
+		ch  += (unsigned char) s[(*i)++];
 	}
 	ch -= offsetsFromUTF8[sz - 1];
 
@@ -498,7 +498,7 @@ size_t
 			amt = 1;
 		}
 		src += amt;
-		amt = u8_wc_toutf8(temp, ch);
+		amt  = u8_wc_toutf8(temp, ch);
 		if (amt > sz - c) {
 			break;
 		}
@@ -624,7 +624,7 @@ char*
 		uint32_t c = csz = 0;
 		do {
 			c <<= 6U;
-			c += (unsigned char) s[i++];
+			c  += (unsigned char) s[i++];
 			csz++;
 		} while (i < sz && !isutf(s[i]));
 		c -= offsetsFromUTF8[csz - 1];
@@ -707,7 +707,6 @@ size_t
 	size_t cnt;
 	bool   needfree = false;
 	size_t sz       = 512;
-	// cppcheck-suppress allocaCalled
 	char*  buf      = (char*) alloca(sz);
 	int    ret      = vsnprintf(buf, sz, fmt, ap);
 	if (ret < 0) {
@@ -720,7 +719,6 @@ size_t
 		needfree = true;
 		vsnprintf(buf, cnt + 1U, fmt, ap);
 	}
-	// cppcheck-suppress allocaCalled
 	uint32_t* wcs = (uint32_t*) alloca((cnt + 1U) * sizeof(uint32_t));
 	size_t    nc  = u8_toucs(wcs, cnt + 1U, buf, cnt);
 	wcs[nc]       = 0;
@@ -855,7 +853,7 @@ int
 					si += 2U;
 					break;
 				case 0xE:
-					di -= 3U;
+					di      -= 3U;
 					dest[di] = src[si];
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-align"

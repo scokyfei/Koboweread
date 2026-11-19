@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -79,6 +79,34 @@ extern "C" {
 //       and this makes bindings happy because they'll have an explicit typedef to rely on.
 //       Fun fact: this is essentially what the Go bindings were already doing ;).
 //
+// Supported targets
+typedef enum
+{
+	FBINK_TARGET_LINUX = 0U,
+	FBINK_TARGET_KOBO,
+	FBINK_TARGET_KINDLE,
+	FBINK_TARGET_KINDLE_LEGACY,
+	FBINK_TARGET_CERVANTES,
+	FBINK_TARGET_REMARKABLE,
+	FBINK_TARGET_POCKETBOOK,
+	FBINK_TARGET_MAX = UINT8_MAX,
+} __attribute__((packed)) FBINK_TARGET_E;
+typedef uint8_t           FBINK_TARGET_T;
+
+// Supported feature flags
+#define FBINK_FEATURE_MINIMAL     0
+#define FBINK_FEATURE_DRAW        (1 << 0)    // Basic draw primitives
+#define FBINK_FEATURE_BITMAP      (1 << 1)    // Fixed-cell font rendering, plus the base IBM font
+#define FBINK_FEATURE_FONTS       (1 << 2)    // The full set of fixed-cell fonts
+#define FBINK_FEATURE_UNIFONT     (1 << 3)    // Unifont for the fixed-cell font rendering
+#define FBINK_FEATURE_OPENTYPE    (1 << 4)    // TrueType/OpenType font rendering
+#define FBINK_FEATURE_IMAGE       (1 << 5)    // Image support
+#define FBINK_FEATURE_BUTTON_SCAN (1 << 6)    // Button scan support (Kobo only, deprecated)
+#define FBINK_FEATURE_INPUT       (1 << 7)    // Input utilities (e.g., fbink_input_scan)
+#define FBINK_FEATURE_FULL                                                                                               \
+	(FBINK_FEATURE_DRAW | FBINK_FEATURE_BITMAP | FBINK_FEATURE_FONTS | FBINK_FEATURE_OPENTYPE |                      \
+	 FBINK_FEATURE_IMAGE | FBINK_FEATURE_INPUT)
+
 // List of available fonts
 typedef enum
 {
@@ -115,7 +143,7 @@ typedef enum
 	COZETTE,                 // Cozette
 	FONT_MAX = UINT8_MAX,    // uint8_t
 } __attribute__((packed)) FONT_INDEX_E;
-typedef uint8_t FONT_INDEX_T;
+typedef uint8_t           FONT_INDEX_T;
 
 // List of supported font styles
 typedef enum
@@ -136,7 +164,7 @@ typedef enum
 	EDGE,                     // i.e., RIGHT for halign, BOTTOM for valign
 	ALIGN_MAX = UINT8_MAX,    // uint8_t
 } __attribute__((packed)) ALIGN_INDEX_E;
-typedef uint8_t ALIGN_INDEX_T;
+typedef uint8_t           ALIGN_INDEX_T;
 
 // List of available padding values
 typedef enum
@@ -147,7 +175,7 @@ typedef enum
 	FULL_PADDING,
 	MAX_PADDING = UINT8_MAX,    // uint8_t
 } __attribute__((packed)) PADDING_INDEX_E;
-typedef uint8_t PADDING_INDEX_T;
+typedef uint8_t           PADDING_INDEX_T;
 
 // List of available colors in the eInk color map
 // NOTE: This is split in FG & BG to ensure that the default values lead to a sane result (i.e., black on white)
@@ -171,7 +199,7 @@ typedef enum
 	FG_WHITE,              // 0xFF
 	FG_MAX = UINT8_MAX,    // uint8_t
 } __attribute__((packed)) FG_COLOR_INDEX_E;
-typedef uint8_t FG_COLOR_INDEX_T;
+typedef uint8_t           FG_COLOR_INDEX_T;
 
 typedef enum
 {
@@ -193,7 +221,7 @@ typedef enum
 	BG_BLACK,
 	BG_MAX = UINT8_MAX,    // uint8_t
 } __attribute__((packed)) BG_COLOR_INDEX_E;
-typedef uint8_t BG_COLOR_INDEX_T;
+typedef uint8_t           BG_COLOR_INDEX_T;
 
 // List of Cervantes device IDs (HWConfig PCB index)
 typedef enum
@@ -209,32 +237,46 @@ typedef enum
 // List of Kobo device IDs
 typedef enum
 {
-	DEVICE_KOBO_TOUCH_A       = 300U,    // Not an actual Kobo ID, Nickel bundles it with the B
-	DEVICE_KOBO_TOUCH_B       = 310U,
-	DEVICE_KOBO_TOUCH_C       = 320U,
-	DEVICE_KOBO_MINI          = 340U,
-	DEVICE_KOBO_GLO           = 330U,
-	DEVICE_KOBO_GLO_HD        = 371U,
-	DEVICE_KOBO_TOUCH_2       = 372U,
-	DEVICE_KOBO_AURA          = 360U,
-	DEVICE_KOBO_AURA_HD       = 350U,
-	DEVICE_KOBO_AURA_H2O      = 370U,
-	DEVICE_KOBO_AURA_H2O_2    = 374U,
-	DEVICE_KOBO_AURA_H2O_2_R2 = 378U,
-	DEVICE_KOBO_AURA_ONE      = 373U,
-	DEVICE_KOBO_AURA_ONE_LE   = 381U,
-	DEVICE_KOBO_AURA_SE       = 375U,
-	DEVICE_KOBO_AURA_SE_R2    = 379U,
-	DEVICE_KOBO_CLARA_HD      = 376U,
-	DEVICE_KOBO_FORMA         = 377U,
-	DEVICE_KOBO_FORMA_32GB    = 380U,
-	DEVICE_KOBO_LIBRA_H2O     = 384U,
-	DEVICE_KOBO_NIA           = 382U,
-	DEVICE_KOBO_ELIPSA        = 387U,
-	DEVICE_KOBO_LIBRA_2       = 388U,
-	DEVICE_KOBO_SAGE          = 383U,
-	DEVICE_KOBO_CLARA_2E      = 386U,
-	DEVICE_KOBO_MAX           = UINT16_MAX,    // uint16_t
+	DEVICE_KOBO_TOUCH_A        = 300U,    // Not an actual Kobo ID, Nickel bundles it with the B
+	DEVICE_KOBO_TOUCH_B        = 310U,
+	DEVICE_KOBO_TOUCH_C        = 320U,
+	DEVICE_KOBO_MINI           = 340U,
+	DEVICE_KOBO_GLO            = 330U,
+	DEVICE_KOBO_GLO_HD         = 371U,
+	DEVICE_TOLINO_SHINE_2HD    = DEVICE_KOBO_GLO_HD + 300U,
+	DEVICE_KOBO_TOUCH_2        = 372U,
+	DEVICE_KOBO_AURA           = 360U,
+	DEVICE_KOBO_AURA_HD        = 350U,
+	DEVICE_KOBO_AURA_H2O       = 370U,
+	DEVICE_KOBO_AURA_H2O_2     = 374U,
+	DEVICE_KOBO_AURA_H2O_2_R2  = 378U,
+	DEVICE_KOBO_AURA_ONE       = 373U,
+	DEVICE_KOBO_AURA_ONE_LE    = 381U,
+	DEVICE_KOBO_AURA_SE        = 375U,
+	DEVICE_TOLINO_VISION       = DEVICE_KOBO_AURA_SE + 300U,
+	DEVICE_KOBO_AURA_SE_R2     = 379U,
+	DEVICE_KOBO_CLARA_HD       = 376U,
+	DEVICE_TOLINO_SHINE_3      = DEVICE_KOBO_CLARA_HD + 300U,
+	DEVICE_KOBO_FORMA          = 377U,
+	DEVICE_TOLINO_EPOS_2       = DEVICE_KOBO_FORMA + 300U,
+	DEVICE_KOBO_FORMA_32GB     = 380U,
+	DEVICE_KOBO_LIBRA_H2O      = 384U,
+	DEVICE_TOLINO_VISION_5     = DEVICE_KOBO_LIBRA_H2O + 300U,
+	DEVICE_KOBO_NIA            = 382U,
+	DEVICE_KOBO_ELIPSA         = 387U,
+	DEVICE_KOBO_LIBRA_2        = 388U,
+	DEVICE_KOBO_SAGE           = 383U,
+	DEVICE_TOLINO_EPOS_3       = DEVICE_KOBO_SAGE + 300U,
+	DEVICE_KOBO_CLARA_2E       = 386U,
+	DEVICE_KOBO_ELIPSA_2E      = 389U,
+	DEVICE_KOBO_LIBRA_COLOUR   = 390U,
+	DEVICE_TOLINO_VISION_COLOR = DEVICE_KOBO_LIBRA_COLOUR + 300U,
+	DEVICE_KOBO_CLARA_BW       = 391U,
+	DEVICE_TOLINO_SHINE_BW     = DEVICE_KOBO_CLARA_BW + 300U,
+	DEVICE_KOBO_CLARA_COLOUR   = 393U,
+	DEVICE_TOLINO_SHINE_COLOR  = DEVICE_KOBO_CLARA_COLOUR + 300U,
+	DEVICE_KOBO_CLARA_BW_TPV   = 395U,
+	DEVICE_KOBO_MAX            = UINT16_MAX,    // uint16_t
 } __attribute__((packed)) KOBO_DEVICE_ID_E;
 
 // List of device IDs for mainline kernels
@@ -243,6 +285,7 @@ typedef enum
 {
 	DEVICE_MAINLINE_TOLINO_SHINE_2HD   = ('T' << 8U) | ('o' << 8U) | ('l' << 8U) | DEVICE_KOBO_GLO_HD,
 	DEVICE_MAINLINE_TOLINO_SHINE_3     = ('T' << 8U) | ('o' << 8U) | ('l' << 8U) | DEVICE_KOBO_CLARA_HD,
+	DEVICE_MAINLINE_TOLINO_VISION      = ('T' << 8U) | ('o' << 8U) | ('l' << 8U) | DEVICE_KOBO_AURA_SE,
 	DEVICE_MAINLINE_TOLINO_VISION_5    = ('T' << 8U) | ('o' << 8U) | ('l' << 8U) | DEVICE_KOBO_LIBRA_H2O,
 	DEVICE_MAINLINE_GENERIC_IMX5       = ('i' << 8U) | ('.' << 8U) | 'M' | 'X' | '5',
 	DEVICE_MAINLINE_GENERIC_IMX6       = ('i' << 8U) | ('.' << 8U) | 'M' | 'X' | '6',
@@ -261,33 +304,42 @@ typedef enum
 // List of PocketBook device IDs
 typedef enum
 {
-	DEVICE_POCKETBOOK_MINI          = 515U,
-	DEVICE_POCKETBOOK_606           = 606U,
-	DEVICE_POCKETBOOK_611           = 611U,
-	DEVICE_POCKETBOOK_613           = 613U,
-	DEVICE_POCKETBOOK_614           = 614U,
-	DEVICE_POCKETBOOK_615           = 615U,
-	DEVICE_POCKETBOOK_616           = 616U,
-	DEVICE_POCKETBOOK_617           = 617U,
-	DEVICE_POCKETBOOK_TOUCH         = 622U,
-	DEVICE_POCKETBOOK_LUX           = 623U,
-	DEVICE_POCKETBOOK_BASIC_TOUCH   = 624U,
-	DEVICE_POCKETBOOK_BASIC_TOUCH_2 = 625U,
-	DEVICE_POCKETBOOK_LUX_3         = 626U,
-	DEVICE_POCKETBOOK_LUX_4         = 627U,
-	DEVICE_POCKETBOOK_LUX_5         = 628U,
-	DEVICE_POCKETBOOK_SENSE         = 630U,
-	DEVICE_POCKETBOOK_TOUCH_HD      = 631U,
-	DEVICE_POCKETBOOK_TOUCH_HD_PLUS = 632U,
-	DEVICE_POCKETBOOK_COLOR         = 633U,
-	DEVICE_POCKETBOOK_AQUA          = 640U,
-	DEVICE_POCKETBOOK_AQUA2         = 641U,
-	DEVICE_POCKETBOOK_ULTRA         = 650U,
-	DEVICE_POCKETBOOK_INKPAD_3      = 740U,
-	DEVICE_POCKETBOOK_INKPAD_3_PRO  = 742U,
-	DEVICE_POCKETBOOK_INKPAD_COLOR  = 741U,
-	DEVICE_POCKETBOOK_INKPAD        = 840U,
-	DEVICE_POCKETBOOK_INKPAD_X      = 1040U,
+	DEVICE_POCKETBOOK_MINI            = 515U,
+	DEVICE_POCKETBOOK_606             = 606U,
+	DEVICE_POCKETBOOK_611             = 611U,
+	DEVICE_POCKETBOOK_613             = 613U,
+	DEVICE_POCKETBOOK_614             = 614U,
+	DEVICE_POCKETBOOK_615             = 615U,
+	DEVICE_POCKETBOOK_616             = 616U,
+	DEVICE_POCKETBOOK_617             = 617U,
+	DEVICE_POCKETBOOK_618             = 618U,
+	DEVICE_POCKETBOOK_TOUCH           = 622U,
+	DEVICE_POCKETBOOK_LUX             = 623U,
+	DEVICE_POCKETBOOK_BASIC_TOUCH     = 624U,
+	DEVICE_POCKETBOOK_BASIC_TOUCH_2   = 625U,
+	DEVICE_POCKETBOOK_LUX_3           = 626U,
+	DEVICE_POCKETBOOK_LUX_4           = 627U,
+	DEVICE_POCKETBOOK_LUX_5           = 628U,
+	DEVICE_POCKETBOOK_VERSE           = 629U,
+	DEVICE_POCKETBOOK_SENSE           = 630U,
+	DEVICE_POCKETBOOK_TOUCH_HD        = 631U,
+	DEVICE_POCKETBOOK_TOUCH_HD_PLUS   = 632U,
+	DEVICE_POCKETBOOK_COLOR           = 633U,
+	DEVICE_POCKETBOOK_VERSE_PRO       = 634U,
+	DEVICE_POCKETBOOK_VERSE_PRO_COLOR = 634U | 'K',
+	DEVICE_POCKETBOOK_AQUA            = 640U,
+	DEVICE_POCKETBOOK_AQUA2           = 641U,
+	DEVICE_POCKETBOOK_ULTRA           = 650U,
+	DEVICE_POCKETBOOK_ERA             = 700U,
+	DEVICE_POCKETBOOK_ERA_COLOR       = 700U | 'K',
+	DEVICE_POCKETBOOK_INKPAD_3        = 740U,
+	DEVICE_POCKETBOOK_INKPAD_3_PRO    = 742U,
+	DEVICE_POCKETBOOK_INKPAD_COLOR    = 741U,
+	DEVICE_POCKETBOOK_INKPAD_COLOR_2  = 743U | 'C',
+	DEVICE_POCKETBOOK_INKPAD_COLOR_3  = 743U | 'K',
+	DEVICE_POCKETBOOK_INKPAD          = 840U,
+	DEVICE_POCKETBOOK_INKPAD_X        = 1040U,
+	DEVICE_POCKETBOOK_INKPAD_4        = 743U | 'G',
 	DEVICE_POCKETBOOK_COLOR_LUX =
 	    ('C' << 8U) | ('o' << 8U) | ('l' << 8U) | ('o' << 8U) | ('r' << 8U) | 'L' | 'u' | 'x',
 	DEVICE_POCKETBOOK_INKPAD_LITE = 970U,
@@ -302,15 +354,21 @@ typedef enum
 typedef uint16_t DEVICE_ID_T;
 
 // List of *potentially* available waveform modes.
-// NOTE: On EPDC v1 (as well as all Kindle) devices, REAGL & REAGLD generally expect to *always* be flashing.
+// NOTE: On mxcfb EPDC v1 (as well as all Kindle) & most MTK devices, REAGL & REAGLD generally expect to *always* be flashing.
+//       The same is also true for Kaleido-specific modes (GCC16 & GLRC16).
 //       This is currently left at your own discretion, though.
 //       c.f., https://github.com/NiLuJe/FBInk/commit/32acece78f7cc92b06faa4a668feead260b8ce24
+//       See also the comments around the relevant refresh_* functions in fbink.c
 // NOTE: On very old devices (e.g., Kobo Mk. 3 & 4; possibly early PB), only AUTO, DU & GC16 may be relied on.
 //       GC4 will probably behave, but A2 & GL16 are not a given at all:
 //       e.g., GL16 is actively broken on Kobo <= Mk. 4: c.f., https://github.com/baskerville/plato/issues/158#issuecomment-787520759.
 //       If a waveform mode produces unexpected/broken results, and/or if you start to hit unexpected EPDC timeouts (or even an OOPS),
 //       that's usually a strong hint that you're trying to use something you shouldn't ;).
 // NOTE: See the various mxcfb headers in the eink folder for more details about what's available on your platform.
+//       Platform-specific quirks, if any, are also commented upon in the relevant refresh_* functions in fbink.c
+// NOTE: If you're curious about how to deal with all this stuff in practice for real world use-cases,
+//       I'd recommend looking at my various comments in the KOReader backends for some more context,
+//       c.f., https://github.com/koreader/koreader-base/blob/master/ffi/framebuffer_mxcfb.lua
 typedef enum
 {
 	WFM_AUTO = 0U,    // Let the EPDC choose, via histogram analysis of the refresh region.
@@ -367,8 +425,8 @@ typedef enum
 	// If you need to check at runtime whether it's actually supported, on an i.MX board,
 	// check if /sys/class/graphics/fb0/waveform_mode_gck16 exists ;).
 	// Otherwise, refer to the hasEclipseWfm deviceQuirks.
-	WFM_GCK16,     // From black to any. Goes hand-in-hand with GLKW16, should only be used when flashing.
-	WFM_GLKW16,    // From black to any. Newer variant of GL16_INV. (On Kobo, Mk. 9 only. It's GLK16 on sunxi).
+	WFM_GCK16,    // From black to any. Goes hand-in-hand with GLKW16, should only be used when flashing.
+	WFM_GLKW16,    // From black to any. Newer variant of GL16_INV. (On Kobo, Mk. 9, 11 & 12 only. It's GLK16 on sunxi).
 	// For documentation purposes
 	WFM_INIT,    // May flash several times to end up with a white screen, slow (~2000ms).
 	WFM_UNKNOWN,
@@ -385,16 +443,21 @@ typedef enum
 	WFM_GLK16,    // GL16, but for white-on-black.
 	WFM_CLEAR,    // GC16 local (NOTE: Appears to crash the EPDC... [Elipsa on FW 4.28.17826])
 	WFM_GC4L,     // GC4 local (NOTE: Appears to crash the EPDC... [Elipsa on FW 4.28.17826])
-	WFM_GCC16,    // GCC16
+	// Kobo Sunxi; MTK only
+	WFM_GCC16,     // GCC16, for color image content on Kaleido panels.
+	WFM_GLRC16,    // GLRC16, for color highlights on text on Kaleido panels.
 	// Kindle MTK only
 	WFM_GC16_PARTIAL,     // Internal use only, GC16 + PARTIAL
 	WFM_GCK16_PARTIAL,    // Internal use only, GCK16 + PARTIAL
 	WFM_DUNM,             // DU, but for white-on-black.
 	WFM_P2SW,             // Internal use only, used by the swipe animation.
+	// Kindle MTK + CFA only
+	WFM_GCCK16,     // Nightmode GCC16
+	WFM_GLRCK16,    // Nightmode GLRC16
 
 	WFM_MAX = UINT8_MAX,    // uint8_t
 } __attribute__((packed)) WFM_MODE_INDEX_E;
-typedef uint8_t WFM_MODE_INDEX_T;
+typedef uint8_t           WFM_MODE_INDEX_T;
 
 // List of *potentially* available HW dithering modes
 typedef enum
@@ -409,7 +472,24 @@ typedef enum
 	//                        Usually based on Atkinson's algo. The most useful one being the Y8->Y1 one,
 	//                        which we request with A2/DU refreshes.
 } __attribute__((packed)) HW_DITHER_INDEX_E;
-typedef uint8_t HW_DITHER_INDEX_T;
+typedef uint8_t           HW_DITHER_INDEX_T;
+
+// List of *potentially* available CFA post-process modes
+typedef enum
+{
+	CFA_DEFAULT = 0U,
+	CFA_AIE_S4,
+	CFA_AIE_S7,
+	CFA_AIE_S9,
+	CFA_G0,
+	CFA_G1,
+	CFA_G2,
+	CFA_NTX,
+	CFA_NTX_SF,
+	CFA_SKIP,
+	CFA_MAX = UINT8_MAX,
+} __attribute__((packed)) CFA_MODE_INDEX_E;
+typedef uint8_t           CFA_MODE_INDEX_T;
 
 // List of NTX rotation quirk types (c.f., mxc_epdc_fb_check_var @ drivers/video/fbdev/mxc/mxc_epdc_v2_fb.c)...
 typedef enum
@@ -417,7 +497,10 @@ typedef enum
 	NTX_ROTA_STRAIGHT = 0U,    // No shenanigans (at least as far as ioctls are concerned)
 	NTX_ROTA_ALL_INVERTED,     // Every rotation is inverted by the kernel
 	NTX_ROTA_ODD_INVERTED,     // Only Landscape (odd) rotations are inverted by the kernel
-	NTX_ROTA_SANE,             // NTX_ROTA_STRAIGHT, and ntxBootRota is the native Portrait orientation.
+	// NOTE: Everything below this line should be considered mostly deprecated, as those were attempts to piggyback on this flag
+	//       to handle input translations. That was a mistake, we've since switched to dedicated flags for touch input quirks.
+	//       As the comment above implies, this is only meant to deal with the kernel screwing with us when setting the fb rotation.
+	NTX_ROTA_SANE,    // NTX_ROTA_STRAIGHT, and ntxBootRota is the native Portrait orientation.
 	//                            Optionally, bonus points if that's actually UR, and the panel is natively mounted UR,
 	//                            like on the Kobo Libra.
 	//                            Triple whammy if the touch layer rotation matches!
@@ -426,7 +509,7 @@ typedef enum
 	NTX_ROTA_CCW_TOUCH,    // No kernel shenanigans, and Touch panel mounted in the usual rotation.
 	NTX_ROTA_MAX = UINT8_MAX,    // uint8_t
 } __attribute__((packed)) NTX_ROTA_INDEX_E;
-typedef uint8_t NTX_ROTA_INDEX_T;
+typedef uint8_t           NTX_ROTA_INDEX_T;
 
 // Available states for fbink_sunxi_ntx_enforce_rota
 typedef enum
@@ -446,7 +529,7 @@ typedef enum
 	FORCE_ROTA_WORKBUF   = 4,           // Match the working buffer's rotation (NOTE: Requires fbdamage)
 	FORCE_ROTA_MAX       = INT8_MAX,    // int8_t
 } __attribute__((packed)) SUNXI_FORCE_ROTA_INDEX_E;
-typedef int8_t SUNXI_FORCE_ROTA_INDEX_T;
+typedef int8_t            SUNXI_FORCE_ROTA_INDEX_T;
 
 // List of swipe directions for fbink_mtk_set_swipe_data
 typedef enum
@@ -457,7 +540,7 @@ typedef enum
 	MTK_SWIPE_DIR_RIGHT = 3,
 	MTK_SWIPE_DIR_MAX   = UINT8_MAX,    // uint8_t
 } __attribute__((packed)) MTK_SWIPE_DIRECTION_INDEX_E;
-typedef uint8_t MTK_SWIPE_DIRECTION_INDEX_T;
+typedef uint8_t           MTK_SWIPE_DIRECTION_INDEX_T;
 
 // List of halftone pattern modes for fbink_mtk_set_halftone
 typedef enum
@@ -466,7 +549,25 @@ typedef enum
 	MTK_HALFTONE_DEFAULT_CHECKER_SIZE = 1,
 	MTK_HALFTONE_MAX_CHECKER_SIZE     = INT32_MAX,    // int
 } __attribute__((packed)) MTK_HALFTONE_MODE_INDEX_E;
-typedef int32_t MTK_HALFTONE_MODE_INDEX_T;
+typedef int32_t           MTK_HALFTONE_MODE_INDEX_T;
+
+// List of supported pixel formats
+typedef enum
+{
+	FBINK_PXFMT_UNKNOWN = 0,
+	FBINK_PXFMT_Y4      = 4,
+	FBINK_PXFMT_Y8      = 8,
+	FBINK_PXFMT_BGR565  = 16,
+	FBINK_PXFMT_RGB565,
+	FBINK_PXFMT_BGR24 = 24,
+	FBINK_PXFMT_RGB24,
+	FBINK_PXFMT_BGRA = 32,
+	FBINK_PXFMT_RGBA,
+	FBINK_PXFMT_BGR32,
+	FBINK_PXFMT_RGB32,
+	FBINK_PXFMT_MAX = UINT8_MAX,    // uint8_t
+} __attribute__((packed)) FBINK_PXFMT_INDEX_E;
+typedef uint8_t           FBINK_PXFMT_INDEX_T;
 
 //
 // A struct to dump FBInk's internal state into, like fbink_state_dump() would, but in C ;)
@@ -481,9 +582,9 @@ typedef struct
 	uint32_t    scanline_stride;        // fInfo.line_length (scanline length in bytes, padding included)
 	uint32_t    bpp;                    // vInfo.bits_per_pixel
 	bool        inverted_grayscale;     // true if vInfo.grayscale is set to GRAYSCALE_8BIT_INVERTED (@ 8bpp)
-	char        device_name[16];        // deviceQuirks.deviceName (short common name, no brand)
-	char        device_codename[16];    // deviceQuirks.deviceCodename
-	char        device_platform[16];    // deviceQuirks.devicePlatform (often a codename, too)
+	char        device_name[32];        // deviceQuirks.deviceName (short common name, no brand)
+	char        device_codename[32];    // deviceQuirks.deviceCodename
+	char        device_platform[32];    // deviceQuirks.devicePlatform (often a codename, too)
 	DEVICE_ID_T device_id;              // deviceQuirks.deviceId (decimal value, c.f., identify_device() on Kindle!)
 	uint8_t     pen_fg_color;           // penFGColor (Actual grayscale value, not FG_COLOR_INDEX_E)
 	uint8_t     pen_bg_color;           // penBGColor (ditto)
@@ -499,20 +600,29 @@ typedef struct
 	uint8_t glyph_width;           // glyphWidth (native width of a glyph cell, i.e. unscaled)
 	uint8_t glyph_height;          // glyphHeight (native height of a glyph cell, i.e. unscaled)
 	bool    is_perfect_fit;        // deviceQuirks.isPerfectFit (horizontal column balance is perfect over viewWidth)
+	bool    is_mtk;                // deviceQuirks.isMTK (device is running on a MediaTek SoC)
 	bool    is_sunxi;              // deviceQuirks.isSunxi (device is running on an AllWinner SoC)
+	bool    is_tolino;             // deviceQuirks.isTolino (device is a Tolino running a FW in Tolino mode)
 	bool    sunxi_has_fbdamage;    // sunxiCtx.has_fbdamage (true when fbdamage module is loaded)
 	SUNXI_FORCE_ROTA_INDEX_T sunxi_force_rota;    // sunxiCtx.force_rota (current effective value)
 	bool is_kindle_legacy;    // deviceQuirks.isKindleLegacy (device is a Kindle using the original einkfb EPDC API)
-	bool is_kindle_mtk;       // deviceQuirks.isKindleMTK (device is a Kindle running on a MediatTek SoC)
 	bool is_kobo_non_mt;      // deviceQuirks.isKoboNonMT (device is a Kobo with no MultiTouch input support)
 	bool unreliable_wait_for;           // deviceQuirks.unreliableWaitFor (MXCFB_WAIT_FOR_UPDATE_COMPLETE may timeout)
+	bool can_wake_epdc;                 // deviceQuirks.canWakeEPDC (i.e., fbink_wakeup_epdc is *NOT* a NOP)
 	uint8_t          ntx_boot_rota;     // deviceQuirks.ntxBootRota (Native rotation at boot)
-	NTX_ROTA_INDEX_T ntx_rota_quirk;    // deviceQuirks.ntxRotaQuirk (c.f., utils/dump.c)
-	bool    is_ntx_quirky_landscape;    // deviceQuirks.isNTX16bLandscape (rotation compensation is in effect)
-	uint8_t current_rota;               // vInfo.rotate (current native rotation, c.f., <linux/fb.h>)
-	bool    can_rotate;                 // deviceQuirks.canRotate (device has a gyro)
-	bool    can_hw_invert;              // deviceQuirks.canHWInvert (device can use EPDC inversion)
-	bool    has_eclipse_wfm;            // deviceQuirks.hasEclipseWfm (device can use nightmode waveform modes)
+	NTX_ROTA_INDEX_T ntx_rota_quirk;    // deviceQuirks.ntxRotaQuirk (c.f., tools/rota_map.c)
+	uint8_t          rotation_map[4];    // deviceQuirks.rotationMap (index is native, value is canonical)
+	bool touch_swap_axes;    // deviceQuirks.touchSwapAxes (panel reports swapped coordinates axes; handle this first)
+	bool touch_mirror_x;     // deviceQuirks.touchMirrorX (post-swap, panel reports inverted x coordinates)
+	bool touch_mirror_y;     // deviceQuirks.touchMirrorY (post-swap, panel reports inverted y coordinates)
+	bool is_ntx_quirky_landscape;    // deviceQuirks.isNTX16bLandscape (rotation compensation is in effect)
+	uint8_t current_rota;       // vInfo.rotate (current native rotation, <linux/fb.h>; Device rotation, not buffer!)
+	bool    can_rotate;         // deviceQuirks.canRotate (device has a gyro)
+	bool    can_hw_invert;      // deviceQuirks.canHWInvert (device can use EPDC inversion)
+	bool    has_eclipse_wfm;    // deviceQuirks.hasEclipseWfm (device can use nightmode waveform modes)
+	bool    has_color_panel;    // deviceQuirks.hasColorPanel (device features a Kaleido/CFA color panel)
+	FBINK_PXFMT_INDEX_T pixel_format;    // deviceQuirks.pixelFormat
+	bool can_wait_for_submission;    // deviceQuirks.canWaitForSubmission (devices supports fbink_wait_for_submission)
 } FBInkState;
 
 // What a FBInk config should look like. Perfectly sane when fully zero-initialized.
@@ -522,7 +632,7 @@ typedef struct
 	short int        col;         // x axis (i.e., column), counts down from the right edge of the screen if negative
 	uint8_t          fontmult;    // Font scaling multiplier (i.e., 4 -> x4), 0 means automatic.
 	FONT_INDEX_T     fontname;    // Request a specific bundled font
-	bool             is_inverted;    // Invert colors.
+	bool             is_inverted;    // Invert colors when *drawing* stuff (e.g., text, clear & images).
 	//				This is *NOT* mutually exclusive with is_nightmode, and is *always* supported.
 	bool             is_flashing;    // Request a black flash on refresh (e.g., UPDATE_MODE_FULL instead of PARTIAL)
 	bool             is_cleared;     // Clear the full screen beforehand (honors bg_color & is_inverted)
@@ -554,15 +664,17 @@ typedef struct
 	HW_DITHER_INDEX_T dithering_mode;    // Request a specific dithering mode (defaults to PASSTHROUGH)
 	bool              sw_dithering;      // Request (ordered) *software* dithering when printing an image.
 	//                                      This is *NOT* mutually exclusive with dithering_mode!
-	bool is_nightmode;    // Request hardware inversion (via EPDC_FLAG_ENABLE_INVERSION, if supported/safe).
+	CFA_MODE_INDEX_T  cfa_mode;    // Request a specific CFA post-process mode (defaults to NONE, relevant wfm only).
+	bool    is_nightmode;          // Request hardware inversion (via EPDC_FLAG_ENABLE_INVERSION, if supported/safe).
 	//			 This is *NOT* mutually exclusive with is_inverted!
 	//			 NOTE: If the HW doesn't support inversion, a warning is printed during init.
 	//			       If you're convinced this is in error (i.e., up to date kernel),
 	//			       you can bypass that check by setting FBINK_ALLOW_HW_INVERT in your env.
-	bool no_refresh;     // Skip actually refreshing the eInk screen (useful when drawing in batches)
-	bool no_merge;       // Set the EINK_NO_MERGE flag (Kobo sunxi only)
-	bool is_animated;    // Enable refresh animation, following fbink_mtk_set_swipe_data (Kindle MTK only)
-	bool to_syslog;      // Send messages & errors to the syslog instead of stdout/stderr
+	bool    no_refresh;          // Skip actually refreshing the eInk screen (useful when drawing in batches)
+	bool    no_merge;            // Set the EINK_NO_MERGE flag (Kobo sunxi only)
+	bool    is_animated;         // Enable refresh animation, following fbink_mtk_set_swipe_data (Kindle MTK only)
+	uint8_t saturation_boost;    // Boost image saturation, in %. Useful on Kaleido panels. Only affects 32bpp.
+	bool    to_syslog;           // Send messages & errors to the syslog instead of stdout/stderr
 } FBInkConfig;
 
 // Same, but for OT/TTF specific stuff. MUST be zero-initialized.
@@ -579,7 +691,8 @@ typedef struct
 		short int bottom;    // Bottom margin in pixels (supports negative values, too)
 		short int left;      // Left margin in pixels (if negative, counts backwards from the right edge)
 		short int right;     // Right margin in pixels (supports negative values, too)
-	} margins;
+	} margins;    // Margins are to the top-left edge of the bounding box, e.g., assuming no alignment/centering,
+		      // zero margins will lead to a bounding box flush with the top-left corner of the screen.
 	FONT_STYLE_T       style;          // Default font style to use when !is_formatted (defaults to Regular)
 	float              size_pt;        // Size of text in points. If not set (0.0f), defaults to 12pt
 	unsigned short int size_px;        // Size of text in pixels. Optional, but takes precedence over size_pt.
@@ -606,7 +719,12 @@ typedef struct
 	unsigned short int rendered_lines;    // Actually rendered amount of lines.
 	//                                       Will stay 0 in case of an early abort (or a compute_only run),
 	//                                       or < computed_lines in case of an unexpected truncation due to broken metrics.
-	bool               truncated;    // true if the string was truncated (at computation or rendering time).
+	struct
+	{
+		unsigned short int width;
+		unsigned short int height;
+	} bbox;            // Bounding box of the string (at computation time, padding excluded).
+	bool truncated;    // true if the string was truncated (at computation or rendering time).
 } FBInkOTFit;
 
 // This maps to an mxcfb rectangle, used for fbink_get_last_rect, as well as in FBInkDump
@@ -640,6 +758,14 @@ typedef struct
 
 // Returns the version of the currently loaded FBInk library.
 FBINK_API const char* fbink_version(void) __attribute__((const));
+
+// Returns the target platform of the currently loaded FBInk library.
+// c.f., FBINK_TARGET_E enum
+FBINK_API FBINK_TARGET_T fbink_target(void) __attribute__((const));
+
+// Returns a bitmask of the features available in the currently loaded FBInk library.
+// c.f., FBINK_FEATURE_ defines
+FBINK_API uint32_t fbink_features(void) __attribute__((const));
 
 //
 // Open the framebuffer character device,
@@ -679,16 +805,17 @@ FBINK_API int fbink_close(int fbfd);
 // NOTE: You can perfectly well keep a few different FBInkConfig structs around, instead of modifying the same one over and over.
 //       Just remember that some fields *require* an fbink_init() call to be taken into account (see above),
 //       but if the only fields that differ don't fall into that category, you do *NOT* need an fbink_init() per FBInkConfig...
-FBINK_API int fbink_init(int fbfd, const FBInkConfig* restrict fbink_cfg);
+FBINK_API int fbink_init(int fbfd, const FBInkConfig* restrict fbink_cfg) __attribute__((nonnull));
 
 //
 // Dump a few of our internal state variables to stdout, in a format easily consumable by a shell (i.e., eval).
-FBINK_API void fbink_state_dump(const FBInkConfig* restrict fbink_cfg);
+FBINK_API void fbink_state_dump(const FBInkConfig* restrict fbink_cfg) __attribute__((nonnull));
 
 // Dump a few of our internal state variables to the FBInkState struct pointed to by fbink_state.
 // NOTE: This includes quite a few useful things related to device identification, c.f., the FBInkState struct ;).
 //       You can also peek at the output of fbink -e to get a hint of what the data actually looks like.
-FBINK_API void fbink_get_state(const FBInkConfig* restrict fbink_cfg, FBInkState* restrict fbink_state);
+FBINK_API void fbink_get_state(const FBInkConfig* restrict fbink_cfg, FBInkState* restrict fbink_state)
+    __attribute__((nonnull));
 
 //
 // Print a string on screen.
@@ -706,7 +833,8 @@ FBINK_API void fbink_get_state(const FBInkConfig* restrict fbink_cfg, FBInkState
 // string:		UTF-8 encoded string to print.
 // fbink_cfg:		Pointer to an FBInkConfig struct.
 //				Honors every field not specifically related to image/dump support.
-FBINK_API int fbink_print(int fbfd, const char* restrict string, const FBInkConfig* restrict fbink_cfg);
+FBINK_API int fbink_print(int fbfd, const char* restrict string, const FBInkConfig* restrict fbink_cfg)
+    __attribute__((nonnull));
 
 //
 // Add an OpenType font to FBInk.
@@ -720,21 +848,22 @@ FBINK_API int fbink_print(int fbfd, const char* restrict string, const FBInkConf
 //       but you can't use the Kobo ones because they're obfuscated...
 //       Which leads me to a final, critical warning:
 // NOTE: Don't try to pass non-font files or encrypted/obfuscated font files, because it *will* horribly segfault!
-FBINK_API int fbink_add_ot_font(const char* filename, FONT_STYLE_T style);
+FBINK_API int fbink_add_ot_font(const char* filename, FONT_STYLE_T style) __attribute__((nonnull));
 // Same API and behavior, except that the set of fonts being loaded is tied to this specific FBInkOTConfig instance,
 // instead of being global.
 // In which case, resources MUST be released via fbink_free_ot_fonts_v2()!
 // NOTE: You can mix & match the v2 and legacy API, but for every fbink_add_ot_font() there must be an fbink_free_ot_fonts(),
 //       and for every fbink_add_ot_font_v2(), there must be an fbink_free_ot_fonts_v2()
 //       (for each matching FBInkOTConfig instance).
-FBINK_API int fbink_add_ot_font_v2(const char* filename, FONT_STYLE_T style, FBInkOTConfig* restrict cfg);
+FBINK_API int fbink_add_ot_font_v2(const char* filename, FONT_STYLE_T style, FBInkOTConfig* restrict cfg)
+    __attribute__((nonnull));
 
 // Free all loaded OpenType fonts. You MUST call this when you have finished all OT printing.
 // NOTE: Safe to call even if no fonts were actually loaded.
 FBINK_API int fbink_free_ot_fonts(void);
 // Same, but for a specific FBInkOTConfig instance if fbink_add_ot_font_v2 was used.
 // NOTE: Safe to call even if no fonts were actually loaded, in which case it'll return -(EINVAL)!
-FBINK_API int fbink_free_ot_fonts_v2(FBInkOTConfig* restrict cfg);
+FBINK_API int fbink_free_ot_fonts_v2(FBInkOTConfig* restrict cfg) __attribute__((nonnull));
 
 // Print a string using an OpenType font.
 // NOTE: The caller MUST have loaded at least one font via fbink_add_ot_font() FIRST.
@@ -773,23 +902,26 @@ FBINK_API int fbink_print_ot(int fbfd,
 			     const char* restrict string,
 			     const FBInkOTConfig* restrict cfg,
 			     const FBInkConfig* restrict fbink_cfg,
-			     FBInkOTFit* restrict fit);
+			     FBInkOTFit* restrict fit) __attribute__((nonnull(2)));
 
 //
 // Brings printf formatting to fbink_print and fbink_print_ot ;).
 // fbfd:		Open file descriptor to the framebuffer character device,
 //				if set to FBFD_AUTO, the fb is opened & mmap'ed for the duration of this call.
-// cfg:			Optional pointer to an FBInkOTConfig struct.
+// ot_cfg:		Optional pointer to an FBInkOTConfig struct.
 // fbink_cfg:		Optional pointer to an FBInkConfig struct.
-// NOTE: If cfg is NULL, will call fbink_print, otherwise, fbink_print_ot!
-//       If cfg is valid, fbink_cfg MAY be NULL (same behavior as fbink_print_ot).
-//       If cfg is NULL, fbink_cfg MUST be valid.
-// NOTE: Meaning at least one of those two pointers MUST be valid!
+// ot_fit:		Optional pointer to an FBInkOTFit struct.
+// NOTE: If ot_cfg is NULL, will call fbink_print, otherwise, fbink_print_ot!
+//       If ot_cfg is valid, fbink_cfg MAY be NULL (same behavior as fbink_print_ot).
+//       If ot_cfg is NULL, fbink_cfg MUST be valid.
+// NOTE: Meaning you MUST at least pass either an fbink_cfg or an ot_cfg pointer!
+// NOTE: ot_fit behaves like in fbink_print_ot (i.e., it's only relevant if you pass an ot_cfg pointer, but it may be NULL).
 FBINK_API int fbink_printf(int fbfd,
-			   const FBInkOTConfig* restrict cfg,
+			   const FBInkOTConfig* restrict ot_cfg,
 			   const FBInkConfig* restrict fbink_cfg,
+			   FBInkOTFit* restrict ot_fit,
 			   const char* fmt,
-			   ...) __attribute__((format(printf, 4, 5)));
+			   ...) __attribute__((format(printf, 5, 6)));
 
 //
 // A simple wrapper around the internal screen refresh handling, without requiring you to include einkfb/mxcfb headers.
@@ -816,17 +948,25 @@ FBINK_API int fbink_printf(int fbfd,
 //       (There's no "shared" framebuffer, each process gets its own private, zero-initialized (i.e., solid black) buffer).
 // NOTE: In case of ioctl failure, errno *should* be preserved,
 //       allowing the caller to possibly handle some very specific edge-cases.
+// NOTE: The confusing coordinates order is inherited from the layout of an mxcfb_rect struct.
+//       See fbink_refresh_rect below for a variant that takes an FBInkRect instead.
 FBINK_API int fbink_refresh(int      fbfd,
 			    uint32_t region_top,
 			    uint32_t region_left,
 			    uint32_t region_width,
 			    uint32_t region_height,
-			    const FBInkConfig* restrict fbink_cfg);
+			    const FBInkConfig* restrict fbink_cfg) __attribute__((nonnull));
+
+//
+// Variant of fbink_refresh that takes an FBInkRect instead of broken out coordinates.
+// Completely identical behavior.
+FBINK_API int fbink_refresh_rect(int fbfd, const FBInkRect* restrict rect, const FBInkConfig* restrict fbink_cfg)
+    __attribute__((nonnull));
 
 // A simple wrapper around the MXCFB_WAIT_FOR_UPDATE_SUBMISSION ioctl, without requiring you to include mxcfb headers.
 // Returns -(EINVAL) when the update marker is invalid.
 // Returns -(ENOSYS) on devices where this ioctl is unsupported.
-// NOTE: It is only implemented by Kindle kernels (K5+)!
+// NOTE: It is only implemented by Kindle kernels (K5+), and Kobo kernels for MTK SoCs (Mk. 11)!
 // fbfd:		Open file descriptor to the framebuffer character device,
 //				if set to FBFD_AUTO, the fb is opened for the duration of this call.
 // marker:		The update marker you want to wait for.
@@ -934,14 +1074,14 @@ FBINK_API bool fbink_is_fb_quirky(void) __attribute__((pure, deprecated));
 // fbfd:		Open file descriptor to the framebuffer character device,
 //				if set to FBFD_AUTO, the fb is opened for the duration of this call.
 // fbink_cfg:		Pointer to an FBInkConfig struct.
-FBINK_API int fbink_reinit(int fbfd, const FBInkConfig* restrict fbink_cfg) __attribute__((warn_unused_result));
+FBINK_API int fbink_reinit(int fbfd, const FBInkConfig* restrict fbink_cfg) __attribute__((warn_unused_result, nonnull));
 
 // Update FBInk's internal verbosity flags
 // As mentioned in fbink_init(), the is_verbose, is_quiet & to_syslog fields in an FBInkConfig
 // are only processed at initialization time.
 // This function allows doing *just* that, without having to go through a more costly full (re)-init.
 // fbink_cfg:		Pointer to an FBInkConfig struct (is_verbose, is_quiet & to_syslog).
-FBINK_API void fbink_update_verbosity(const FBInkConfig* restrict fbink_cfg);
+FBINK_API void fbink_update_verbosity(const FBInkConfig* restrict fbink_cfg) __attribute__((nonnull));
 
 // Update FBInk's internal representation of pen colors
 // As mentioned in fbink_init(), the fg_color & bg_color fields in an FBInkConfig are only processed at initialization time.
@@ -950,7 +1090,7 @@ FBINK_API void fbink_update_verbosity(const FBInkConfig* restrict fbink_cfg);
 // This function allows doing *just* that, without having to go through a more costly full (re)-init.
 // Returns -(ENOSYS) when drawing primitives are disabled (MINIMAL build w/o DRAW).
 // fbink_cfg:		Pointer to an FBInkConfig struct (honors fg_color & bg_color).
-FBINK_API int fbink_update_pen_colors(const FBInkConfig* restrict fbink_cfg);
+FBINK_API int fbink_update_pen_colors(const FBInkConfig* restrict fbink_cfg) __attribute__((nonnull));
 
 // We'll need those for fbink_set_*_pen_* (start > 256 to stay clear of errno values)
 #define OK_ALREADY_SAME (1 << 9)
@@ -964,6 +1104,8 @@ FBINK_API int fbink_update_pen_colors(const FBInkConfig* restrict fbink_cfg);
 // update:		If true, abort early and return OK_ALREADY_SAME if that's already the current color.
 FBINK_API int fbink_set_fg_pen_gray(uint8_t y, bool quantize, bool update);
 FBINK_API int fbink_set_bg_pen_gray(uint8_t y, bool quantize, bool update);
+// NOTE: You should be aware that subsequent fbink_init calls (and fbink_reinit when it leads to a reinit) *will*
+//       reset the pen colors to a grayscale representation of whatever RGB values you set this way!
 // r:			8-bit red component value
 // g:			8-bit green component value
 // b:			8-bit blue component value
@@ -982,7 +1124,8 @@ FBINK_API int fbink_set_bg_pen_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a, 
 // percentage:		0-100 value to set the progress bar's progression.
 // fbink_cfg:		Pointer to an FBInkConfig struct (ignores is_overlay, col & hoffset;
 //				as well as is_centered & is_padded).
-FBINK_API int fbink_print_progress_bar(int fbfd, uint8_t percentage, const FBInkConfig* restrict fbink_cfg);
+FBINK_API int fbink_print_progress_bar(int fbfd, uint8_t percentage, const FBInkConfig* restrict fbink_cfg)
+    __attribute__((nonnull));
 
 // Print a full-width activity bar on screen (i.e., an infinite progress bar).
 // Returns -(ENOSYS) when fixed-cell font support is disabled (MINIMAL build w/o BITMAP).
@@ -991,7 +1134,8 @@ FBINK_API int fbink_print_progress_bar(int fbfd, uint8_t percentage, const FBInk
 // progress:		0-16 value to set the progress thumb's position in the bar.
 // fbink_cfg:		Pointer to an FBInkConfig struct (ignores is_overlay, is_fgless, col & hoffset;
 //				as well as is_centered & is_padded).
-FBINK_API int fbink_print_activity_bar(int fbfd, uint8_t progress, const FBInkConfig* restrict fbink_cfg);
+FBINK_API int fbink_print_activity_bar(int fbfd, uint8_t progress, const FBInkConfig* restrict fbink_cfg)
+    __attribute__((nonnull));
 
 //
 // Print an image on screen.
@@ -1025,7 +1169,7 @@ FBINK_API int fbink_print_image(int         fbfd,
 				const char* filename,
 				short int   x_off,
 				short int   y_off,
-				const FBInkConfig* restrict fbink_cfg);
+				const FBInkConfig* restrict fbink_cfg) __attribute__((nonnull));
 
 // Print raw scanlines on screen (packed pixels).
 // Returns -(ENOSYS) when image support is disabled (MINIMAL build w/o IMAGE).
@@ -1051,16 +1195,16 @@ FBINK_API int fbink_print_image(int         fbfd,
 //       Generally, that'd be RGBA (32bpp) on Kobo (or RGB (24bpp) with ignore_alpha),
 //       and YA (grayscale + alpha) on Kindle (or Y (8bpp) with ignore_alpha).
 FBINK_API int fbink_print_raw_data(int fbfd,
-				   unsigned char* restrict data,
+				   const unsigned char* restrict data,
 				   const int    w,
 				   const int    h,
 				   const size_t len,
 				   short int    x_off,
 				   short int    y_off,
-				   const FBInkConfig* restrict fbink_cfg);
+				   const FBInkConfig* restrict fbink_cfg) __attribute__((nonnull));
 
 //
-// Just clear the screen (or a region of it), eInk refresh included (or not ;)).
+// Just clear the screen (or a region of it), using the background pen color, eInk refresh included (or not ;)).
 // Returns -(ENOSYS) when drawing primitives are disabled (MINIMAL build w/o DRAW).
 // fbfd:		Open file descriptor to the framebuffer character device,
 //				if set to FBFD_AUTO, the fb is opened & mmap'ed for the duration of this call.
@@ -1076,7 +1220,10 @@ FBINK_API int fbink_print_raw_data(int fbfd,
 //				This is mildly useful if you got a *rotated* rect out of fbink_get_last_rect
 //				on such a quirky framebuffer state,
 //				and just want to re-use it as-is without mangling the rotation again.
-FBINK_API int fbink_cls(int fbfd, const FBInkConfig* restrict fbink_cfg, const FBInkRect* restrict rect, bool no_rota);
+// NOTE: This can be used to draw arbitrary filled rectangles (using the bg pen color),
+//       but, for convenience, fbink_fill_rect_gray & fbink_fill_rect_rgba are also available.
+FBINK_API int fbink_cls(int fbfd, const FBInkConfig* restrict fbink_cfg, const FBInkRect* restrict rect, bool no_rota)
+    __attribute__((nonnull(2)));
 
 // Like fbink_cls, but instead of absolute coordinates, rely on grid coordinates like fbink_print.
 // Honors all the same positioning trickery than fbink_print (i.e., row/col mixed w/ hoffset/voffset).
@@ -1090,7 +1237,7 @@ FBINK_API int fbink_cls(int fbfd, const FBInkConfig* restrict fbink_cfg, const F
 FBINK_API int fbink_grid_clear(int                fbfd,
 			       unsigned short int cols,
 			       unsigned short int rows,
-			       const FBInkConfig* restrict fbink_cfg);
+			       const FBInkConfig* restrict fbink_cfg) __attribute__((nonnull));
 
 // Like fbink_refresh, but instead of absolute coordinates, rely on grid coordinates like fbink_print.
 // Honors all the same positioning trickery than fbink_print (i.e., row/col mixed w/ hoffset/voffset).
@@ -1105,7 +1252,7 @@ FBINK_API int fbink_grid_clear(int                fbfd,
 FBINK_API int fbink_grid_refresh(int                fbfd,
 				 unsigned short int cols,
 				 unsigned short int rows,
-				 const FBInkConfig* restrict fbink_cfg);
+				 const FBInkConfig* restrict fbink_cfg) __attribute__((nonnull));
 
 //
 // Dump the full screen.
@@ -1127,7 +1274,7 @@ FBINK_API int fbink_grid_refresh(int                fbfd,
 //       in case you'd ever want to do some more exotic things with it...
 // NOTE: On Kobo devices with a sunxi SoC, you will not be able to capture content that you haven't drawn yourself first.
 //       (There's no "shared" framebuffer, each process gets its own private, zero-initialized (i.e., solid black) buffer).
-FBINK_API int fbink_dump(int fbfd, FBInkDump* restrict dump);
+FBINK_API int fbink_dump(int fbfd, FBInkDump* restrict dump) __attribute__((nonnull));
 
 // Dump a specific region of the screen.
 // Returns -(ENOSYS) when image support is disabled (MINIMAL build w/o IMAGE).
@@ -1147,7 +1294,7 @@ FBINK_API int fbink_region_dump(int                fbfd,
 				unsigned short int w,
 				unsigned short int h,
 				const FBInkConfig* restrict fbink_cfg,
-				FBInkDump* restrict dump);
+				FBInkDump* restrict dump) __attribute__((nonnull));
 
 // Like fbink_region_dump, but takes an FBInkRect as input, and uses it *as is* (i.e., no rotation/positioning tricks).
 // Returns -(ENOSYS) when image support is disabled (MINIMAL build w/o IMAGE).
@@ -1157,7 +1304,8 @@ FBINK_API int fbink_region_dump(int                fbfd,
 // (c.f., also the "no_rota" flag for fbink_cls).
 // NOTE: If NULL or an empty rect is passed, a full dump will be made instead.
 // NOTE: The same considerations as in fbink_dump should be taken regarding the handling of FBInkDump structs.
-FBINK_API int fbink_rect_dump(int fbfd, const FBInkRect* restrict rect, FBInkDump* restrict dump);
+FBINK_API int fbink_rect_dump(int fbfd, const FBInkRect* restrict rect, FBInkDump* restrict dump)
+    __attribute__((nonnull(3)));
 
 // Restore a framebuffer dump made by fbink_dump/fbink_region_dump/fbink_rect_dump.
 // Returns -(ENOSYS) when image support is disabled (MINIMAL build w/o IMAGE).
@@ -1188,7 +1336,8 @@ FBINK_API int fbink_rect_dump(int fbfd, const FBInkRect* restrict rect, FBInkDum
 //       Of course, only the intersection of this rectangle with the dump's area will be restored.
 //       Be aware that you'll also need to flip the is_full field yourself first if you ever need to crop a full dump.
 // NOTE: This does *NOT* free data.dump!
-FBINK_API int fbink_restore(int fbfd, const FBInkConfig* restrict fbink_cfg, const FBInkDump* restrict dump);
+FBINK_API int fbink_restore(int fbfd, const FBInkConfig* restrict fbink_cfg, const FBInkDump* restrict dump)
+    __attribute__((nonnull));
 
 // Free the data allocated by a previous fbink_dump() or fbink_region_dump() call.
 // Returns -(ENOSYS) when image support is disabled (MINIMAL build w/o IMAGE).
@@ -1198,7 +1347,7 @@ FBINK_API int fbink_restore(int fbfd, const FBInkConfig* restrict fbink_cfg, con
 // NOTE: You MUST call this when you have no further use for this specific data.
 // NOTE: But, you MAY re-use a single FBInkDump struct across different dump() calls *without* calling this in between,
 //       as dump() will implicitly free a dirty struct in order to recycle it.
-FBINK_API int fbink_free_dump_data(FBInkDump* restrict dump);
+FBINK_API int fbink_free_dump_data(FBInkDump* restrict dump) __attribute__((nonnull));
 
 //
 // Return the coordinates & dimensions of the last thing that was *drawn*.
@@ -1223,6 +1372,8 @@ FBINK_API FBInkRect fbink_get_last_rect(bool rotated);
 //
 // Scan the screen for Kobo's "Connect" button in the "USB plugged in" popup,
 // and optionally generate an input event to press that button.
+// NOTE: This is deprecated, and no longer built by default on Kobo.
+//       NickelMenu and/or NickelDBus provide far more robust solutions for this.
 // KOBO i.MX Only! Returns -(ENOSYS) when disabled (!KOBO, or Kobo on a sunxi SoC, as well as MINIMAL builds w/o BUTTON_SCAN).
 // Otherwise, returns a few different things on failure:
 //	-(EXIT_FAILURE)	when the button was not found.
@@ -1242,7 +1393,7 @@ FBINK_API FBInkRect fbink_get_last_rect(bool rotated);
 //				avoiding the nanosleep() calls that would incur...
 // NOTE: Thread-safety obviously goes out the window with press_button enabled,
 //       since you can then only reasonably expect to be able to concurrently run a single instance of that function ;).
-FBINK_API int fbink_button_scan(int fbfd, bool press_button, bool nosleep);
+FBINK_API int fbink_button_scan(int fbfd, bool press_button, bool nosleep) __attribute__((deprecated));
 
 // Wait for the end of a Kobo USBMS session, trying to detect a successful content import in the process.
 // NOTE: Expects to be called while in the "Connected" state (like after a successful fbink_button_scan() call w/ press_buton)!
@@ -1269,7 +1420,8 @@ FBINK_API int fbink_wait_for_usbms_processing(int fbfd, bool force_unplug);
 //
 // Attempt to untangle the rotation state on Kobo devices, converting between the murky "native" value
 // (i.e., what's in the fb vinfo), and a "canonical" one, representing how the device is actually physically laid out.
-// KOBO Only! Returns ENOSYS when disabled (!KOBO). Yes, that's ENOSYS, positive, given the function's signature ;).
+// KOBO Only! Returns ENOSYS when disabled (!KOBO), or ERANGE if the input rotation is invalid.
+// Yes, those are positive values, given the function's signature ;).
 // See fbink_rota_quirks.c & utils/fbdepth.c for more details.
 FBINK_API uint8_t  fbink_rota_native_to_canonical(uint32_t rotate);
 FBINK_API uint32_t fbink_rota_canonical_to_native(uint8_t rotate);
@@ -1282,7 +1434,29 @@ FBINK_API uint32_t fbink_rota_canonical_to_native(uint8_t rotate);
 //				if set to FBFD_AUTO, the fb is opened & mmap'ed for the duration of this call.
 // fbink_cfg:		Pointer to an FBInkConfig struct.
 // NOTE: On Kobo devices with a sunxi SoC, you will not be able to affect content that you haven't drawn yourself first.
-FBINK_API int fbink_invert_screen(int fbfd, const FBInkConfig* restrict fbink_cfg);
+//       i.e., this will only apply to stuff drawn via FBInk's own framebuffer pointer (be it by FBInk or yourself).
+FBINK_API int fbink_invert_screen(int fbfd, const FBInkConfig* restrict fbink_cfg) __attribute__((nonnull));
+
+//
+// Inverts the *existing* content of a specific *region* of the screen.
+// This is mildly useful on devices with no HW inversion support,
+// to implement inversion after the fact when you don't necessarily control the drawing.
+// NOTE: Unlike fbink_invert_screen, this does *NOT* trigger a refresh!
+// fbfd:		Open file descriptor to the framebuffer character device,
+//				if set to FBFD_AUTO, the fb is opened & mmap'ed for the duration of this call.
+// rect:		Optional pointer to an FBInkRect rectangle (as, say, returned by fbink_get_last_rect),
+//				describing the specific region of screen to invert (in absolute coordinates).
+//				If the rectangle is empty (i.e., width or height is zero) or the pointer is NULL,
+//				the full screen will be inverted.
+// no_rota:		Optional, and only useful in very limited cases. When in doubt, set to false.
+//				When passing a rect, this requests *not* applying any further rotation hacks,
+//				(e.g., isNTX16bLandscape).
+//				This is mildly useful if you got a *rotated* rect out of fbink_get_last_rect
+//				on such a quirky framebuffer state,
+//				and just want to re-use it as-is without mangling the rotation again.
+// NOTE: On Kobo devices with a sunxi SoC, you will not be able to affect content that you haven't drawn yourself first.
+//       i.e., this will only apply to stuff drawn via FBInk's own framebuffer pointer (be it by FBInk or yourself).
+FBINK_API int fbink_invert_rect(int fbfd, const FBInkRect* restrict rect, bool no_rota);
 
 //
 // The functions below are much lower level than the rest of the API:
@@ -1300,11 +1474,12 @@ FBINK_API int fbink_invert_screen(int fbfd, const FBInkConfig* restrict fbink_cf
 // fbfd:		Open file descriptor to the framebuffer character device,
 //				cannot be set to FBFD_AUTO!
 // buffer_size:		Out parameter. On success, will be set to the buffer's size, in bytes.
-FBINK_API unsigned char* fbink_get_fb_pointer(int fbfd, size_t* buffer_size);
+FBINK_API unsigned char* fbink_get_fb_pointer(int fbfd, size_t* buffer_size) __attribute__((nonnull));
 
 // For when you *really* need a mostly untouched copy of the full linuxfb structs...
 // NOTE: Prefer fbink_get_state, unless you *really* have no other choices...
-FBINK_API void fbink_get_fb_info(struct fb_var_screeninfo* var_info, struct fb_fix_screeninfo* fix_info);
+FBINK_API void fbink_get_fb_info(struct fb_var_screeninfo* var_info, struct fb_fix_screeninfo* fix_info)
+    __attribute__((nonnull));
 
 // Magic constants for fbink_set_fb_info (> INT8_MAX to steer clear of legitimate values)
 #define KEEP_CURRENT_ROTATE    (1 << 7)
@@ -1337,10 +1512,11 @@ FBINK_API void fbink_get_fb_info(struct fb_var_screeninfo* var_info, struct fb_f
 //				Untouched if set to KEEP_CURRENT_BITDEPTH
 // grayscale:		grayscale value.
 //				(enforced to 0 if bpp != 8).
-//				If bpp == 8, only meaningful on mxcfb:
+//				If bpp == 8, only meaningful on mxcfb or mtk:
 //				Generally set to GRAYSCALE_8BIT (1),
 //				setting it to GRAYSCALE_8BIT_INVERTED (2)
-//				will automagically enforce HW inversion via EPDC_FLAG_ENABLE_INVERSION
+//				will automagically enforce HW inversion via EPDC_FLAG_ENABLE_INVERSION (or similar).
+//				On Kindle MTK+Bellatrix4+CFA, GRAYSCALE_COLOR (0) and GRAYSCALE_COLOR_NIGHTMODE (3) are also supported.
 //				Untouched if set to KEEP_CURRENT_GRAYSCALE
 //				If set to TOGGLE_GRAYSCALE, will toggle between INVERTED & not @ 8bpp
 // fbink_cfg:		Pointer to an FBInkConfig struct.
@@ -1348,7 +1524,89 @@ FBINK_API int fbink_set_fb_info(int      fbfd,
 				uint32_t rota,
 				uint8_t  bpp,
 				uint8_t  grayscale,
-				const FBInkConfig* restrict fbink_cfg) __attribute__((warn_unused_result));
+				const FBInkConfig* restrict fbink_cfg) __attribute__((warn_unused_result, nonnull));
+
+// These behave exactly like fbink_cls, but allow you to choose a color directly, instead of relying on the pen's bg color.
+// Mostly useful for GUI toolkit backends, but depending on how it's actually used,
+// remember that this honors `no_refresh` & `is_inverted`!
+// Returns -(ENOSYS) when drawing primitives are disabled (MINIMAL build w/o DRAW).
+// c.f., `fbink_cls` for documentation of the initial parameters they share.
+// y:			8-bit luminance value
+FBINK_API int fbink_fill_rect_gray(int fbfd,
+				   const FBInkConfig* restrict fbink_cfg,
+				   const FBInkRect* restrict rect,
+				   bool    no_rota,
+				   uint8_t y) __attribute__((nonnull(2)));
+// r:			8-bit red component value
+// g:			8-bit green component value
+// b:			8-bit blue component value
+// a:			8-bit alpha component value (opaque is 0xFFu).
+FBINK_API int fbink_fill_rect_rgba(int fbfd,
+				   const FBInkConfig* restrict fbink_cfg,
+				   const FBInkRect* restrict rect,
+				   bool    no_rota,
+				   uint8_t r,
+				   uint8_t g,
+				   uint8_t b,
+				   uint8_t a) __attribute__((nonnull(2)));
+
+// Convenience public wrappers for a per-pixel put/get.
+// These are designed with *convenience* in mind, *not* performance.
+// (In particular, a pixel needs to be packed on *each* call).
+// I'd highly recommend handling drawing yourself if you can ;).
+// NOTE: Unlike the fbink_fill_rect family of functions,
+//       the fbink_put_pixel family will *never* trigger a refresh.
+//       (Which explains why they don't need to take an FBInkConfig pointer).
+// Returns -(ENOSYS) when drawing primitives are disabled (MINIMAL build w/o DRAW).
+// x:                   x coordinates
+// y:                   y coordinates
+// v:			8-bit luminance value
+FBINK_API int fbink_put_pixel_gray(int fbfd, uint16_t x, uint16_t y, uint8_t v);
+// r:			8-bit red component value
+// g:			8-bit green component value
+// b:			8-bit blue component value
+// a:			8-bit alpha component value (opaque is 0xFFu).
+FBINK_API int fbink_put_pixel_rgba(int fbfd, uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+// *r:			out pointer, 8-bit red component value
+// *g:			out pointer, 8-bit green component value
+// *b:			out pointer, 8-bit blue component value
+// *a:			out pointer, 8-bit alpha component value (opaque is 0xFFu).
+// NOTE: If pixelformat is grayscale, r = g = b and a = 0xFF
+// NOTE: Red always means red, if there's a BGR swap involved, it's handled for you.
+//       Similarly, BGR565/RBG565 is unpacked to RGB32.
+FBINK_API int fbink_get_pixel(int fbfd, uint16_t x, uint16_t y, uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* a);
+
+// As a means to alleviate *some* of the pixel packing overhead mentioned above,
+// the following set of functions allow you to actually *save* a packed pixel,
+// and pass it to dedicated variants of put_pixel & fill_rect.
+// This is helpful if you often reuse the same color.
+// NOTE: The packing is only accurate for the *current* pixel format,
+//       consider re-packing after a potential bitdepth change!
+//       (e.g., when handling an fbink_reinit call).
+// Returns -(ENOSYS) when drawing primitives are disabled (MINIMAL build w/o DRAW).
+FBINK_API int fbink_pack_pixel_gray(uint8_t y, uint32_t* px);
+FBINK_API int fbink_pack_pixel_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a, uint32_t* px);
+// c.f., `fbink_put_pixel_*` for documentation of the initial parameters they share.
+// px:                   out pointer, packed pixel in the *current* framebuffer pixel format
+FBINK_API int fbink_put_pixel(int fbfd, uint16_t x, uint16_t y, void* px);
+FBINK_API int fbink_fill_rect(int fbfd,
+			      const FBInkConfig* restrict fbink_cfg,
+			      const FBInkRect* restrict rect,
+			      bool  no_rota,
+			      void* px) __attribute__((nonnull(2)));
+// c.f., `fbink_put_pixel_*` & `fbink_fill_rect_*` for documentation of the initial parameters they share.
+// px:                   pointer to a packed pixel, as provided by the fbink_pack_pixel_* family of functions.
+
+// Forcefully wakeup the EPDC (Kobo Mk.8+ only)
+// We've found this to be helpful on a few otherwise crashy devices,
+// c.f., https://github.com/koreader/koreader-base/pull/1645 & https://github.com/koreader/koreader/pull/10771
+// Keep in mind that a few Mk. 7 devices can also be mildly temperamental in some circumstances,
+// and that this feature isn't supported on those, c.f., https://github.com/koreader/koreader/issues/11511
+// NOTE: Nickel fires this off from its input handler, debounced at roughly 1.5s or 4s intervals,
+//       which sounds like a slightly more elegant approach than the one I opted for in KOReader ;).
+//       (As a fun quirk, it only does this after *touch* inputs, not *key* inputs).
+// Returns -(ENOSYS) on unsupported platforms.
+FBINK_API int fbink_wakeup_epdc(void);
 
 //
 // The functions below are tied to specific capabilities on Kobo devices with a sunxi SoC (e.g., the Elipsa & Sage).
@@ -1356,7 +1614,6 @@ FBINK_API int fbink_set_fb_info(int      fbfd,
 // Toggle the "pen" refresh mode. c.f., eink/sunxi-kobo.h @ DISP_EINK_SET_NTX_HANDWRITE_ONOFF for more details.
 // The TL;DR being that it's only truly active when using A2 & DU waveform modes.
 // And since, on sunxi, A2's MONOCHROME flag is just *software* dithering, you might actually prefer DU.
-// (And/or we ought to just get rid of EINK_MONOCHROME on this platform, TBD ;)).
 // Returns -(ENOSYS) on unsupported platforms.
 // fbfd:		Open file descriptor to the framebuffer character device,
 //				if set to FBFD_AUTO, the fb is opened & mmap'ed for the duration of this call.
@@ -1383,7 +1640,7 @@ FBINK_API int fbink_sunxi_toggle_ntx_pen_mode(int fbfd, bool toggle);
 //       c.f., <https://github.com/NiLuJe/mxc_epdc_fb_damage>.
 // NOTE: On success, this will reinit the state *now* (returning the exact same values as fbink_reinit).
 FBINK_API int fbink_sunxi_ntx_enforce_rota(int fbfd, SUNXI_FORCE_ROTA_INDEX_T mode, const FBInkConfig* restrict fbink_cfg)
-    __attribute__((warn_unused_result));
+    __attribute__((warn_unused_result, nonnull));
 
 //
 // The functions below are tied to specific capabilities on Kindle devices with a MediaTek SoC (e.g., the PW5).
@@ -1404,7 +1661,7 @@ FBINK_API int fbink_mtk_set_swipe_data(MTK_SWIPE_DIRECTION_INDEX_T direction, ui
 //       TL;DR: Don't mix with fbink_mtk_toggle_auto_reagl(false)!
 FBINK_API int fbink_wait_for_any_complete(int fbfd);
 
-// Setup the screen regions to gray out with a checkered pattern.
+// Setup the screen regions to gray out with a checkered pattern (Kindle only).
 // Returns -(ENOSYS) on unsupported platforms.
 // NOTE: Both of the regions are the *excluded* regions (i.e., the regions that will *NOT* be checkered).
 //       You *MAY* only set a single exclude region, in which case, use the first array member.
@@ -1414,7 +1671,7 @@ FBINK_API int fbink_wait_for_any_complete(int fbfd);
 // NOTE: This will *NOT* apply to EPDC_FLAG_USE_ALT_BUFFER updates.
 FBINK_API int fbink_mtk_set_halftone(int fbfd, const FBInkRect exclude_regions[2], MTK_HALFTONE_MODE_INDEX_T size);
 
-// Toggle whether large enough refresh regions will automatically be upgraded to REAGL.
+// Toggle whether large enough refresh regions will automatically be upgraded to REAGL (Kindle only).
 // NOTE: Only applies to DU, GL16 & GC16 PARTIAL updates.
 // NOTE: Only applies in day mode (e.g., GRAYSCALE_8BIT, not GRAYSCALE_8BIT_INVERTED).
 // NOTE: Currently applies to regions both over a third of the screen's width and a fourth of the screen's height.
@@ -1423,7 +1680,7 @@ FBINK_API int fbink_mtk_set_halftone(int fbfd, const FBInkRect exclude_regions[2
 // Returns -(ENOSYS) on unsupported platforms.
 FBINK_API int fbink_mtk_toggle_auto_reagl(int fbfd, bool toggle);
 
-// Toggle the "pen" refresh mode (Bellatrix3 only).
+// Toggle the "pen" refresh mode (Kindle on Bellatrix3 only).
 // Returns -(ENOSYS) on unsupported platforms (NOTE: We currently *allow* this on Bellatrix, where it will fail).
 // fbfd:		Open file descriptor to the framebuffer character device,
 //				if set to FBFD_AUTO, the fb is opened & mmap'ed for the duration of this call.
@@ -1433,6 +1690,97 @@ FBINK_API int fbink_mtk_toggle_auto_reagl(int fbfd, bool toggle);
 //       failing to do so will temporarily disable pen mode.
 FBINK_API int fbink_mtk_toggle_pen_mode(int fbfd, bool toggle);
 
+//
+// The functions below are small utilities to make working with input devices slightly less painful.
+//
+
+// Input device classification
+typedef enum
+{
+	INPUT_UNKNOWN            = 0U,
+	// Standard udev classification
+	INPUT_POINTINGSTICK      = 1U << 0U,
+	INPUT_MOUSE              = 1U << 1U,
+	INPUT_TOUCHPAD           = 1U << 2U,
+	INPUT_TOUCHSCREEN        = 1U << 3U,
+	INPUT_JOYSTICK           = 1U << 4U,
+	INPUT_TABLET             = 1U << 5U,    // Includes touchscreens w/ stylus support
+	INPUT_KEY                = 1U << 6U,    // Supports at least *1* EV_KEY keycode (may include touchscreens)
+	INPUT_KEYBOARD           = 1U << 7U,
+	INPUT_ACCELEROMETER      = 1U << 8U,
+	// Custom classification, tailored for our use-cases
+	INPUT_POWER_BUTTON       = 1U << 16U,
+	INPUT_SLEEP_COVER        = 1U << 17U,
+	INPUT_PAGINATION_BUTTONS = 1U << 18U,
+	INPUT_HOME_BUTTON        = 1U << 19U,
+	INPUT_LIGHT_BUTTON       = 1U << 20U,    // e.g., the frontlight toggle button on some early Kobos
+	INPUT_MENU_BUTTON        = 1U << 21U,
+	INPUT_DPAD               = 1U << 22U,
+	INPUT_ROTATION_EVENT     = 1U << 23U,    // Where "device was rotated" events *may* be sent (gyro or not)
+	INPUT_SCALED_TABLET      = 1U << 24U,    // INPUT_TABLET, with max ABS_X/ABS_Y that match the fb's resolution
+	INPUT_VOLUME_BUTTONS     = 1U << 25U,
+	INPUT_KINDLE_FRAME_TAP   = 1U << 26U,    // For the "double-tap on device" gestures introduced with the PW6 & CS
+} __attribute__((packed)) INPUT_DEVICE_TYPE_E;
+typedef uint32_t          INPUT_DEVICE_TYPE_T;
+
+// Input classification settings
+typedef enum
+{
+	SCAN_ONLY     = 1U << 0U,    // Do *NOT* leave any fd's open'ed
+	OPEN_BLOCKING = 1U << 1U,    // Do *NOT* open fd's with O_NONBLOCK
+	MATCH_ALL     = 1U << 2U,    // Match on *all* the match_types bits instead of *any*
+	EXCLUDE_ALL   = 1U << 3U,    // Exclude on *all* the exclude_types bits instead of *any*
+	NO_RECAP      = 1U << 4U,    // Do *NOT* print a recap of the results of input device classification
+} __attribute__((packed)) INPUT_SETTINGS_TYPE_E;
+typedef uint32_t          INPUT_SETTINGS_TYPE_T;
+
+typedef struct
+{
+	INPUT_DEVICE_TYPE_T type;          // bitmask
+	int                 fd;            // Set to -1 when not open
+	bool                matched;       // true if type matches the match/exclude combo
+	char                name[256];     // As reported by EVIOCGNAME
+	char                path[4096];    // e.g., /dev/input/event%d
+} FBInkInputDevice;
+
+// Scan & classify input devices into actionable categories.
+// Returns a pointer to the first element of an array of FBInkInputDevice structs, containing `dev_count` elements.
+// Regardless of the filter you request, this will always contain *all* the device's input devices.
+// The `matched` field will be set to true if that device matches *any/all* (depending on `MATCH_ALL`) of the bits in `match_types`
+// and *not* *any/all* (depending on `EXCLUDE_ALL`) of the bits in `exclude_types`, meaning you can either cast a fairly wide net,
+// and still catch everything you care about; or tackle an exclude mask on top for more fine-grained filtering.
+// You *MUST* free the returned pointer after use (it's heap allocated).
+// Returns NULL on failure (no input devices can be read, or MINIMAL build w/o INPUT).
+// match_types:		Bitmask used to filter the type of input devices you want to open.
+// exclude_types:	Bitmask used to filter *out* some input device types from results that matched match_types.
+//			Set to 0 to forgo an exclude mask.
+// settings:		Bitmask that controls some of the scan's behavior.
+//				if the OPEN_BLOCKING bit is set, fds will be opened in *blocking* mode.
+//					Otherwise, the default open flags are O_RDONLY|O_NONBLOCK|O_CLOEXEC
+//				if the SCAN_ONLY bit is set, *no* fds will be returned, regardless of the filter.
+//				if the MATCH_ALL bit is set,
+//				a device must feature *all* of the bits in match_types to be considered a match.
+//					Otherwise, any of each individal bit will be enough.
+//				if the EXCLUDE_ALL bit is set,
+//				a device must *not* feature *all* of the bits in exclude_types to be considered a match.
+//					Otherwise, any of each individal bit will be enough to warrant an exclusion.
+//			Set to 0 for default settings.
+// dev_count:		out pointer, will be set to the amount of array elements in the returned data.
+// NOTE: This does *NOT* require fbink to be initialized, but *does* honor its internal verbosity state.
+FBINK_API FBInkInputDevice* fbink_input_scan(INPUT_DEVICE_TYPE_T   match_types,
+					     INPUT_DEVICE_TYPE_T   exclude_types,
+					     INPUT_SETTINGS_TYPE_T settings,
+					     size_t*               dev_count);
+
+// Variant of the above that takes a filepath instead of scanning /dev/input/event*
+// This is useful to handle hotplug events, for instance.
+// Returns a pointer to an FBInkInputDevice struct.
+// You *MUST* free the returned pointer after use (it's heap allocated).
+// Returns NULL on failure (filepath cannot be read, or MINIMAL build w/o INPUT).
+FBINK_API FBInkInputDevice* fbink_input_check(const char*           filepath,
+					      INPUT_DEVICE_TYPE_T   match_types,
+					      INPUT_DEVICE_TYPE_T   exclude_types,
+					      INPUT_SETTINGS_TYPE_T settings);
 //
 ///
 //

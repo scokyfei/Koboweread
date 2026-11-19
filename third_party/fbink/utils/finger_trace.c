@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -69,10 +69,6 @@
 		(x__ > y__) ? x__ : y__;                                                                                 \
 	})
 
-// Having a static input device number all these years couldn't go on forever...
-#define NXP_TOUCH_DEV   "/dev/input/event1"
-#define SUNXI_TOUCH_DEV "/dev/input/by-path/platform-0-0010-event"
-
 typedef struct
 {
 	int32_t x;
@@ -111,8 +107,9 @@ typedef struct
 	FTrace_Slot*     touch;
 	FTrace_Slot*     prev_touch;
 	int              fbfd;
-	int32_t          dim_swap;
-	uint8_t          canonical_rota;
+	bool             swap_axes;
+	bool             mirror_x;
+	bool             mirror_y;
 } FTrace_Context;
 
 static const char*
@@ -136,62 +133,46 @@ static void
 	const FBInkState*  fbink_state = ctx->fbink_state;
 	const FTrace_Slot* touch       = ctx->touch;
 
-	// NOTE: The following was borrowed from my experiments with this in InkVT ;).
-	// Deal with device-specific rotation quirks...
-	FTrace_Coordinates canonical_pos;
-	// c.f., https://github.com/koreader/koreader/blob/master/frontend/device/kobo/device.lua
+	// We'll need a copy of our precomputed rotation + panel coordinates transforms...
+	// (If it weren't for the Touch B quirk below, we wouldn't need a copy at all :/).
+	bool       swap_axes = ctx->swap_axes;
+	bool       mirror_x  = ctx->mirror_x;
+	const bool mirror_y  = ctx->mirror_y;
+
+	// The Touch B does something... weird.
 	if (fbink_state->device_id == DEVICE_KOBO_TOUCH_B && touch->state == UP) {
-		// The Touch B does something... weird.
-		// The frame that reports a contact lift does the coordinates transform for us...
-		// That makes this a NOP for this frame only...
-		canonical_pos.x = touch->pos.x;
-		canonical_pos.y = touch->pos.y;
-	} else if (fbink_state->device_id == DEVICE_KOBO_AURA_H2O_2 || fbink_state->device_id == DEVICE_KOBO_LIBRA_2) {
-		// Aura H2O²r1 & Libra 2
-		// !touch_mirrored_x
-		canonical_pos.x = touch->pos.y;
-		canonical_pos.y = touch->pos.x;
-	} else {
-		// touch_switch_xy && touch_mirrored_x
-		canonical_pos.x = ctx->dim_swap - touch->pos.y;
-		canonical_pos.y = touch->pos.x;
+		// The frame that reports a contact lift does the panel-specific coordinates transform for us...
+		// That means we need to flip it back...
+		swap_axes = !swap_axes;
+		mirror_x  = !mirror_x;
 	}
 
-	// And, finally, handle somewhat standard touch translation given the current rotation
-	// c.f., GestureDetector:adjustGesCoordinate @ https://github.com/koreader/koreader/blob/master/frontend/device/gesturedetector.lua
+	// Apply the final transformations
 	FTrace_Coordinates translated_pos;
-	switch (ctx->canonical_rota) {
-		case FB_ROTATE_UR:
-			translated_pos = canonical_pos;
-			break;
-		case FB_ROTATE_CW:
-			translated_pos.x = (int32_t) fbink_state->screen_width - canonical_pos.y;
-			translated_pos.y = canonical_pos.x;
-			break;
-		case FB_ROTATE_UD:
-			translated_pos.x = (int32_t) fbink_state->screen_width - canonical_pos.x;
-			translated_pos.y = (int32_t) fbink_state->screen_height - canonical_pos.y;
-			break;
-		case FB_ROTATE_CCW:
-			translated_pos.x = canonical_pos.y;
-			translated_pos.y = (int32_t) fbink_state->screen_height - canonical_pos.x;
-			break;
-		default:
-			translated_pos.x = -1;
-			translated_pos.y = -1;
-			break;
+	// NOTE: Mostly for historical reasons, we follow KOReader's naming scheme and logic flow here,
+	//       so swapping the axes *has* to come first!
+	if (swap_axes) {
+		translated_pos.x = touch->pos.y;
+		translated_pos.y = touch->pos.x;
+	} else {
+		translated_pos.x = touch->pos.x;
+		translated_pos.y = touch->pos.y;
+	}
+	if (mirror_x) {
+		translated_pos.x = (int32_t) fbink_state->screen_width - 1 - translated_pos.x;
+	}
+	if (mirror_y) {
+		translated_pos.y = (int32_t) fbink_state->screen_height - 1 - translated_pos.y;
 	}
 
 	// Recap the craziness...
-	LOG("%ld.%.6ld [%s] [%s] @ (%4d, %4d) -> (%4d, %4d) => (%4d, %4d)",
+	LOG("%ld.%.6ld [%s] [%s] @ (%4d, %4d) => (%4d, %4d)",
 	    touch->time.tv_sec,
 	    touch->time.tv_usec,
 	    tool_type_to_str(touch->tool),
 	    touch->state == DOWN ? "DOWN" : " UP ",
 	    touch->pos.x,
 	    touch->pos.y,
-	    canonical_pos.x,
-	    canonical_pos.y,
 	    translated_pos.x,
 	    translated_pos.y);
 
@@ -209,7 +190,7 @@ static void
 }
 
 // Process an input event
-static bool
+static void
     process_evdev(const struct input_event* ev, const FTrace_Context* ctx)
 {
 	FBInkConfig*      fbink_cfg   = ctx->fbink_cfg;
@@ -238,8 +219,10 @@ static bool
 			    touch->state == DOWN ? "DOWN" : " UP ");
 		}
 
-		// Keep draining the queue without going back to poll
-		return true;
+		// We're done with this frame, back to the libevdev read loop!
+		// (Which will likely return to poll, unless we're markedly late and the kernel queue has had time to fill up again.
+		// But if all goes well, we should be polling only once per input frame).
+		return;
 	}
 
 	// Detect tool type & all contacts up on Mk. 7 (and possibly earlier "snow" protocol devices).
@@ -247,10 +230,6 @@ static bool
 		switch (ev->code) {
 			case BTN_TOOL_PEN:
 				touch->tool = PEN;
-				// To detect up/down state on "snow" protocol without weird slot shenanigans...
-				// It's out-of-band of MT events, so, it unfortunately means *all* contacts,
-				// not a specific slot...
-				// (i.e., you won't get an EV_KEY:BTN_TOUCH:0 until *all* contact points have been lifted).
 				if (ev->value > 0) {
 					touch->state = DOWN;
 				} else {
@@ -259,6 +238,17 @@ static bool
 				break;
 			case BTN_TOOL_FINGER:
 				touch->tool = FINGER;
+				if (ev->value > 0) {
+					touch->state = DOWN;
+				} else {
+					touch->state = UP;
+				}
+				break;
+			case BTN_TOUCH:
+				// To detect up/down state on "snow" protocol without weird slot shenanigans...
+				// It's out-of-band of MT events, so, it unfortunately means *all* contacts,
+				// not a specific slot...
+				// (i.e., you won't get an EV_KEY:BTN_TOUCH:0 until *all* contact points have been lifted).
 				if (ev->value > 0) {
 					touch->state = DOWN;
 				} else {
@@ -291,6 +281,8 @@ static bool
 				if (ev->value > 0) {
 					touch->state = DOWN;
 				} else {
+					// NOTE: Actually getting a 0-pressure event on lift is *not* a guarantee...
+					//       (Especially on some Elan panels/drivers...)
 					touch->state = UP;
 				}
 				break;
@@ -303,8 +295,10 @@ static bool
 				touch->pos.y = ev->value;
 				break;
 			case ABS_MT_TRACKING_ID:
-				if (fbink_state->is_sunxi) {
-					if (ev->value == -1) {
+				if (ev->value == -1) {
+					touch->state = UP;
+
+					if (fbink_state->is_sunxi) {
 						// NOTE: On sunxi, send a !pen refresh on pen up because otherwise the driver softlocks,
 						//       and ultimately trips a reboot watchdog...
 						// NOTE: Nickel also toggles pen mode *off* before doing that...
@@ -327,8 +321,6 @@ static bool
 				break;
 		}
 	}
-
-	return false;
 }
 
 // Parse an evdev event
@@ -352,9 +344,7 @@ static bool
 			}
 			LOG("<<< RE-SYNCED >>>");
 		} else if (rc == LIBEVDEV_READ_STATUS_SUCCESS) {
-			if (process_evdev(&ev, ctx)) {
-				continue;
-			}
+			process_evdev(&ev, ctx);
 		}
 	} while (rc == LIBEVDEV_READ_STATUS_SYNC || rc == LIBEVDEV_READ_STATUS_SUCCESS);
 	if (rc != LIBEVDEV_READ_STATUS_SUCCESS && rc != -EAGAIN) {
@@ -362,7 +352,7 @@ static bool
 		return false;
 	}
 
-	// EAGAIN: we've drained the kernel queue, badk to poll :)
+	// EAGAIN: we've drained the kernel queue, back to poll :)
 	return true;
 }
 
@@ -413,6 +403,13 @@ int
 	// We'll need the state for device identification...
 	fbink_get_state(&fbink_cfg, &fbink_state);
 	ctx.fbink_state = &fbink_state;
+
+	// Dump the rotation map
+	LOG("Rotation map: {%hhu, %hhu, %hhu, %hhu}",
+	    fbink_state.rotation_map[FB_ROTATE_UR],
+	    fbink_state.rotation_map[FB_ROTATE_CW],
+	    fbink_state.rotation_map[FB_ROTATE_UD],
+	    fbink_state.rotation_map[FB_ROTATE_CCW]);
 
 	// Attempt not to murder the crappy sunxi driver, because as suspected,
 	// it doesn't really deal well with refresh storms...
@@ -466,14 +463,26 @@ int
 		fbink_update_pen_colors(&fbink_cfg);
 	}
 
-	// Setup libevdev
-	evfd = open(fbink_state.is_sunxi ? SUNXI_TOUCH_DEV : NXP_TOUCH_DEV, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+	// Autodetect the right input device
+	size_t            dev_count;
+	FBInkInputDevice* devices = fbink_input_scan(INPUT_TOUCHSCREEN, 0U, 0U, &dev_count);
+	if (devices) {
+		for (FBInkInputDevice* device = devices; device < devices + dev_count; device++) {
+			// YOLO, assume there's only one touchscreen
+			if (device->matched) {
+				evfd = device->fd;
+			}
+		}
+		free(devices);
+	}
+
 	if (evfd == -1) {
 		PFWARN("open: %m");
 		rv = ERRCODE(EXIT_FAILURE);
 		goto cleanup;
 	}
 
+	// Setup libevdev, poking at the right input device...
 	dev    = libevdev_new();
 	int rc = libevdev_set_fd(dev, evfd);
 	if (rc < 0) {
@@ -487,26 +496,43 @@ int
 		rv = ERRCODE(EXIT_FAILURE);
 		goto cleanup;
 	}
-	// And we ourselves don't need to grab it, so, don't ;).
-	libevdev_grab(dev, LIBEVDEV_UNGRAB);
+	// We'l keep it grabbed, to prevent interaction with whatever may currently be running.
+	//libevdev_grab(dev, LIBEVDEV_UNGRAB);
 	LOG("Initialized libevdev for device `%s`", libevdev_get_name(dev));
 	ctx.dev = dev;
 
-	// Deal with NTX touch panels insanity...
-	// On Kobo, the touch panel has a fixed rotation, one that *never* matches the actual rotation.
-	// Handle the initial translation here so that it makes sense @ (canonical) UR...
-	// (This is generally a -90°/+90°, made trickier because there's a layout swap so height/width are swapped).
-	// c.f., rotate_touch_coordinates in FBInk for a different, possibly less compatible approach...
-	// NOTE: We only check this on startup here, this would need to be updated on relevant fbink_reinit returns
-	//       if we cared about runtime rotation handling ;).
-	ctx.canonical_rota = fbink_rota_native_to_canonical(fbink_state.current_rota);
-	LOG("Rotation: %hhu -> %hhu", fbink_state.current_rota, ctx.canonical_rota);
-	if ((ctx.canonical_rota & 1U) == 0U) {
-		// Canonical rotation is even (UR/UD)
-		ctx.dim_swap = (int32_t) fbink_state.screen_width;
-	} else {
-		// Canonical rotation is odd (CW/CCW)
-		ctx.dim_swap = (int32_t) fbink_state.screen_height;
+	// We need to know the canonical rotation to deal with coordinates translation...
+	// NOTE: We only check this and compute the matching swap/mirror flags on startup here,
+	//       this would need to be updated on relevant fbink_reinit returns if we cared about runtime rotation handling ;).
+	const uint8_t canonical_rota = fbink_rota_native_to_canonical(fbink_state.current_rota);
+	LOG("Rotation: %hhu -> %hhu", fbink_state.current_rota, canonical_rota);
+
+	// Grab the device-specific panel translation quirks: we end up with flags similar to what is used in KOReader,
+	// c.f., https://github.com/koreader/koreader/blob/master/frontend/device/kobo/device.lua
+	ctx.swap_axes = fbink_state.touch_swap_axes;
+	ctx.mirror_x  = fbink_state.touch_mirror_x;
+	ctx.mirror_y  = fbink_state.touch_mirror_y;
+
+	// Then, we can handle standard coordinates translation given the current rotation.
+	// We'll deal with this by flipping the swap/mirror flags,
+	// which will allow us to handle everything at once when processing an input frame.
+	// c.f., set_rotation @ https://github.com/rmkit-dev/rmkit/blob/master/src/rmkit/input/events.cpy
+	switch (canonical_rota) {
+		case FB_ROTATE_CW:
+			ctx.swap_axes = !ctx.swap_axes;
+			ctx.mirror_y  = !ctx.mirror_y;
+			break;
+		case FB_ROTATE_UD:
+			ctx.mirror_x = !ctx.mirror_x;
+			ctx.mirror_y = !ctx.mirror_y;
+			break;
+		case FB_ROTATE_CCW:
+			ctx.swap_axes = !ctx.swap_axes;
+			ctx.mirror_x  = !ctx.mirror_x;
+			break;
+		default:
+			// NOP
+			break;
 	}
 
 	// Main loop

@@ -13,11 +13,6 @@
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
-    MA 02110-1301 USA.
 */
 
 #include <sys/ioctl.h>
@@ -160,6 +155,24 @@ static const struct func all_func[] = {
 	  .name = "I2C Block Write" },
 	{ .value = I2C_FUNC_SMBUS_READ_I2C_BLOCK,
 	  .name = "I2C Block Read" },
+#if defined(I2C_FUNC_SMBUS_HOST_NOTIFY)
+	{ .value = I2C_FUNC_SMBUS_HOST_NOTIFY,
+	  .name = "SMBus Host Notify" },
+#endif
+	{ .value = I2C_FUNC_10BIT_ADDR,
+	  .name = "10-bit addressing" },
+#if defined(I2C_FUNC_SLAVE)
+	{ .value = I2C_FUNC_SLAVE,
+	  .name = "Target mode" },
+#endif
+#if defined(I2C_FUNC_PROTOCOL_MANGLING)
+	{ .value = I2C_FUNC_PROTOCOL_MANGLING,
+	  .name = "Protocol mangling" },
+#endif
+#if defined(I2C_FUNC_NOSTART)
+	{ .value = I2C_FUNC_NOSTART,
+	  .name = "Repeated start skipping" },
+#endif
 	{ .value = 0, .name = "" }
 };
 

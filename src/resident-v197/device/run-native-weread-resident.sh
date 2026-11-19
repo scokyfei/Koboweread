@@ -98,10 +98,13 @@ fi
 # Modules from the per-kernel set (run-resident-session.sh); none: refuse.
 kmods=/mnt/onboard/.adds/kobo-android-lab/kernels/$(uname -r)
 [ -f "$kmods/SHA256SUMS" ] && [ ! -L "$kmods" ] || exit 2
-for m in ashmem_linux binder_linux kobo_madvise;do
+# Built-in ashmem (Libra Colour, MTK 4.9): the module set has no ashmem_linux.ko.
+ashmem_mod=ashmem_linux;[ -f "$kmods/ashmem_linux.ko" ] || { [ -e /sys/class/misc/ashmem ] && ashmem_mod=; }
+for m in $ashmem_mod binder_linux kobo_madvise;do
  [ -f "$kmods/$m.ko" ] && [ ! -L "$kmods/$m.ko" ] && [ "$(sha256sum "$kmods/$m.ko" | awk '{print $1}')" = "$(awk -v n="$m.ko" '$2==n {print $1}' "$kmods/SHA256SUMS")" ] || { echo "KERNEL_MODULE_HASH_MISMATCH $m";exit 2; }
 done
-if [ -e /dev/binder ] || [ -e /dev/ashmem ] || grep -qE '^(binder_linux|ashmem_linux|kobo_madvise) ' /proc/modules; then echo 'Existing Android devices; refusing';exit 3;fi
+# With the kernel's own ashmem and binder (protocol 8, unused) the nodes always exist; only our modules mark a running Android.
+if { [ -n "$ashmem_mod" ] && { [ -e /dev/binder ] || [ -e /dev/ashmem ]; }; } || grep -qE '^(binder_linux|ashmem_linux|kobo_madvise) ' /proc/modules; then echo 'Existing Android devices; refusing';exit 3;fi
 binder_loaded=0;ashmem_loaded=0;vm_loaded=0;manager_pid=;logger_pid=;debugger_pid=;proc_mounted=0;graphics_ram_mounted=0;property_pid=;sf_pid=;sensor_pid=;installer_pid=;vold_pid=;broker_pid=;dms_pid=
 audio_pid=;dns_pid=;host_network_pid=;priority_pid=;memory_pid=
 bridge_pid=
@@ -252,13 +255,14 @@ if [ "$display_cadence" = 15 ];then
  chmod 0400 "$root/lab/display-cadence15-enabled"
  echo WEREAD_DISPLAY_CADENCE_REQUESTED_15
 fi
-insmod "$kmods/ashmem_linux.ko";ashmem_loaded=1
+[ -z "$ashmem_mod" ] || { insmod "$kmods/ashmem_linux.ko";ashmem_loaded=1; }
 insmod "$kmods/binder_linux.ko";binder_loaded=1
 insmod "$kmods/kobo_madvise.ko";vm_loaded=1
 mkdir -p "$root/dev" "$root/proc" "$root/sys" "$root/data" "$root/tmp"
 for entry in 'null 1 3' 'zero 1 5' 'random 1 8' 'urandom 1 9';do set -- $entry;[ -c "$root/dev/$1" ] || mknod "$root/dev/$1" c "$2" "$3";done
 for name in binder ashmem kobo_madvise;do
- if [ "$name" = binder ];then number=$(cat /sys/class/binder/binder/dev);else number=$(cat "/sys/class/misc/$name/dev");fi
+ # binder_linux registers class binder (Libra 2) or binder32 (Libra Colour, beside the built-in protocol-8 binder).
+ if [ "$name" = binder ];then if [ -e /sys/class/binder32/binder32/dev ];then number=$(cat /sys/class/binder32/binder32/dev);else number=$(cat /sys/class/binder/binder/dev);fi;else number=$(cat "/sys/class/misc/$name/dev");fi
  rm -f "$root/dev/$name"
  mknod "$root/dev/$name" c "${number%:*}" "${number#*:}"
 done

@@ -1,5 +1,5 @@
 # FBInk
-[![License](https://img.shields.io/github/license/NiLuJe/FBInk.svg)](/LICENSE) [![Total alerts](https://img.shields.io/lgtm/alerts/g/NiLuJe/FBInk.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/NiLuJe/FBInk/alerts/) [![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/NiLuJe/FBInk.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/NiLuJe/FBInk/context:cpp) [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/NiLuJe/FBInk.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/NiLuJe/FBInk/context:python) [![Codacy Badge](https://api.codacy.com/project/badge/Grade/0e955c5239c54b10a167bbde1c2d75c1)](https://www.codacy.com/app/NiLuJe/FBInk?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=NiLuJe/FBInk&amp;utm_campaign=Badge_Grade) [![Latest tag](https://img.shields.io/github/tag-date/NiLuJe/FBInk.svg)](https://github.com/NiLuJe/FBInk/releases/)
+[![License](https://img.shields.io/github/license/NiLuJe/FBInk.svg)](/LICENSE) [![Codacy Badge](https://api.codacy.com/project/badge/Grade/0e955c5239c54b10a167bbde1c2d75c1)](https://www.codacy.com/app/NiLuJe/FBInk?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=NiLuJe/FBInk&amp;utm_campaign=Badge_Grade) [![Latest tag](https://img.shields.io/github/tag-date/NiLuJe/FBInk.svg)](https://github.com/NiLuJe/FBInk/releases/)
 
 FrameBuffer eInker
 
@@ -103,12 +103,15 @@ You can also *append* features one by one to a `MINIMAL` build:
 -   Pass `FONTS=1` to add support for the extra bundled fixed-cell fonts. (Implies `BITMAP`)
 -   Pass `IMAGE=1` to add image support. (Implies `DRAW`)
 -   Pass `OPENTYPE=1` to add OTF/TTF font rendering support. (Implies `DRAW`)
+-   Pass `INPUT=1` to add support for input utilities.
 -   Pass `BUTTON_SCAN=1` to add support for the Kobo-specific button scan stuff. (Implies `DRAW`)
 
 If you *really* need *extreme* Unicode coverage in the fixed-cell codepath, you can also choose to embed GNU Unifont, by passing `UNIFONT=1`.  
 Be warned that this'll add almost 2MB to the binary size, and that the font is actually split in two (double-wide glyphs are punted off to a specific font), which may dampen its usefulness in practice...  
 For obvious reasons, this is *never* enabled by default.  
 Unless you're doing *very* specific things, you generally want *at least* `DRAW` & `BITMAP` enabled in a `MINIMAL` build...
+
+Don't forget to run at the very least a `make cleanlib` when changing target platforms or feature flags, otherwise the latest matching library build will be kept, because it'll fullfill the make dependencies ;).
 
 Along the way, a few auxiliary tools may crop up in the `utils` folder. `make utils` will do a static build of these (which is the recommended way to do it, as they rather crudely piggyback on FBInk's *internal* API). Currently, these consist of a diagnostic tool regarding rotation behavior, and the doom stress-test mentioned below.  
 Most of these have *only* been tested on Kobo, and should probably be left alone unless you know what you're doing ;).  
@@ -129,6 +132,8 @@ And on the subject of input & rotation on Kobo, `make ftrace` will build a simpl
 If you intend to handle touch input in any way in your code, this should be a good place to look ;).  
 It also demonstrates how to deal effectively with pen input & drawing on the Elipsa.
 
+As for `make input_scan`, it will build a small CLI tool around the `fbink_input_scan` API, which helps make sense of which input device does what (a.k.a., "where's that damn touchscreen?" ;)).
+
 ## NOTES
 
 Kindle support covers the full Kindle lineup, starting from the K2.
@@ -137,9 +142,16 @@ Kobo support covers the full Kobo lineup, starting from the Kobo Touch A/B/C (NO
 
 BQ Cervantes support has been contributed by [@pazos](https://github.com/pazos) ([#17](https://github.com/NiLuJe/FBInk/pull/17)), and should handle the current lineup.
 
-reMarkable support has been contributed by [@tcrs](https://github.com/tcrs) ([#41](https://github.com/NiLuJe/FBInk/pull/41)).
+reMarkable support has been contributed by [@tcrs](https://github.com/tcrs) ([#41](https://github.com/NiLuJe/FBInk/pull/41)), and supports the rM2 when paired with one of the various rm2fb shim implementations.
 
 PocketBook support was tested by [@ezdiy](https://github.com/ezdiy) ([#47](https://github.com/NiLuJe/FBInk/pull/47)), and should support the same set of devices as KOReader.
+Keep in mind that PocketBook is a... complicated platform to deal with, and that I don't have access to it myself. Meaning there are quite a few quirks involved:
+* We do not use InkView to draw, which means, among other various quirks, that color rendering is unsupported on color devices, and that waveform mode mapping *may* be iffy, especially on devices running on an AW SoC (we always use the mxcfb kernel API, and on those devices, it's a very, very, very quirky shim. Expect weird and strange bugs, especially if you start playing with hardware fb rotation).
+* Another quirk especially prevalent on the AW devices is that the two fbinfo structs are *completely* bogus. FBInk will heuristically mangle them into shape on init, so if you happen to need access to them, *always* go through `fbink_get_fb_info` instead of resorting to the native ioctls yourself.
+* Speaking of InkView, by default, it's dlopen'ed on init to help with device identification. This can be problematic, because InkView pulls a metric crapton of old libraries via DT_NEEDED... *and* initializes some of them on load, which is a perfect recipe for disaster if you happen to you, yourself, use those same libraries, especially if you're using different versions of them. In order to avoid this mess, you can ask FBInk to *never* touch InkView, by setting the `FBINK_NO_INKVIEW` variable in your environment. Currently, the only downside will be impaired device identification: specifically, no device name, and inaccurate DPI (we'll default to 212, unless you set an override via the `FBINK_FORCE_DPI` env var)).
+* And on the subject of rotation, by default, if the device *looks* like its native orientiation is a landscape one (which happens to be true on most of the lineup), FBInk enforces a software rotation in order to actually print stuff in Portrait (mostly to aid interoperability with KOReader). You can disable this behavior by setting the `FBINK_NO_SW_ROTA` variable in your environment, in which case we'll always draw in the native fb layout.
+
+## Related projects
 
 If, instead of *writing* to the framebuffer, you want to *grab* a PNG snapshot of it (which can come in handy), I have a heavily modified version of [FBGrab](https://svn.ak-team.com/svn/Configs/trunk/Kindle/Misc/FBGrab) that should sanely deal with the various quirks of eInk framebuffers ;).
 If you don't actually need a PNG file and just want to play with in-memory fb dumps, look into the whole `fbink_dump` & `fbink_restore` API calls.
@@ -147,6 +159,10 @@ If you don't actually need a PNG file and just want to play with in-memory fb du
 ## Bindings in other languages
 
 So that everyone gets to have fun, even if you can't stand C!
+
+[Rust](https://www.rust-lang.org/): 
+- [fbink-sys](https://github.com/Szybet/fbink-sys) by [@Szybet](https://github.com/Szybet) (Bare bindgen bindings)
+- [fbink-rs](https://github.com/sublipri/fbink-rs) by [@sublipri](https://github.com/sublipri) (Bare bindgen bindings, some safe wrappers, dependent on [cross](https://github.com/cross-rs/cross))
 
 [Go](https://golang.org/): [go-fbink](https://github.com/shermp/go-fbink) and its successor [go-fbink-v2](https://github.com/shermp/go-fbink-v2) by [@shermp](https://github.com/shermp)
 

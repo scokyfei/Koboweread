@@ -1,8 +1,6 @@
 // For use with https://github.com/koreader/ffi-cdecl to re-generate up-to-date FFI declarations ;)
 #include <fbink.h>
 
-#include "ffi-cdecl.h"
-
 // Keep this in the same order as fbink.h
 // Mostly to make it easier to update, but also because Lua can be finicky with the order in which stuff is declared.
 // NOTE: Python's cFFI cdef() function doesn't support attributes (c.f., https://cffi.readthedocs.io/en/latest/cdef.html#ffi-cdef-limitations).
@@ -16,44 +14,50 @@ cdecl_const(LAST_MARKER)
 
 // Typedefs
 cdecl_type(FONT_INDEX_E)
-cdecl_c99_type(FONT_INDEX_T, uint8_t)
+cdecl_type(FONT_INDEX_T)
 
 cdecl_type(FONT_STYLE_E)
 cdecl_type(FONT_STYLE_T)
 
 cdecl_type(ALIGN_INDEX_E)
-cdecl_c99_type(ALIGN_INDEX_T, uint8_t)
+cdecl_type(ALIGN_INDEX_T)
 cdecl_type(PADDING_INDEX_E)
-cdecl_c99_type(PADDING_INDEX_T, uint8_t)
+cdecl_type(PADDING_INDEX_T)
 
 cdecl_type(FG_COLOR_INDEX_E)
-cdecl_c99_type(FG_COLOR_INDEX_T, uint8_t)
+cdecl_type(FG_COLOR_INDEX_T)
 cdecl_type(BG_COLOR_INDEX_E)
-cdecl_c99_type(BG_COLOR_INDEX_T, uint8_t)
+cdecl_type(BG_COLOR_INDEX_T)
 
 cdecl_type(CERVANTES_DEVICE_ID_E)
 cdecl_type(KOBO_DEVICE_ID_E)
 cdecl_type(MAINLINE_DEVICE_ID_E)
 cdecl_type(REMARKABLE_DEVICE_ID_E)
 cdecl_type(POCKETBOOK_DEVICE_ID_E)
-cdecl_c99_type(DEVICE_ID_T, uint16_t)
+cdecl_type(DEVICE_ID_T)
 cdecl_const(DEVICE_UNKNOWN)
 
 cdecl_type(WFM_MODE_INDEX_E)
-cdecl_c99_type(WFM_MODE_INDEX_T, uint8_t)
+cdecl_type(WFM_MODE_INDEX_T)
 cdecl_type(HW_DITHER_INDEX_E)
-cdecl_c99_type(HW_DITHER_INDEX_T, uint8_t)
+cdecl_type(HW_DITHER_INDEX_T)
+
+cdecl_type(CFA_MODE_INDEX_E)
+cdecl_type(CFA_MODE_INDEX_T)
 
 cdecl_type(NTX_ROTA_INDEX_E)
-cdecl_c99_type(NTX_ROTA_INDEX_T, uint8_t)
+cdecl_type(NTX_ROTA_INDEX_T)
 
 cdecl_type(SUNXI_FORCE_ROTA_INDEX_E)
-cdecl_c99_type(SUNXI_FORCE_ROTA_INDEX_T, int8_t)
+cdecl_type(SUNXI_FORCE_ROTA_INDEX_T)
 
 cdecl_type(MTK_SWIPE_DIRECTION_INDEX_E)
-cdecl_c99_type(MTK_SWIPE_DIRECTION_INDEX_T, uint8_t)
+cdecl_type(MTK_SWIPE_DIRECTION_INDEX_T)
 cdecl_type(MTK_HALFTONE_MODE_INDEX_E)
-cdecl_c99_type(MTK_HALFTONE_MODE_INDEX_T, int32_t)
+cdecl_type(MTK_HALFTONE_MODE_INDEX_T)
+
+cdecl_type(FBINK_PXFMT_INDEX_E)
+cdecl_type(FBINK_PXFMT_INDEX_T)
 
 // Config structs
 cdecl_type(FBInkState)

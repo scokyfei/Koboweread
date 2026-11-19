@@ -24,6 +24,15 @@
 #include "forma-buttons.h"
 #include "../libra2-prototype/device-profile.h"
 static volatile sig_atomic_t stopped;
+/* Libra Colour (N428): the Elan panel's X axis runs the other way. KOReader's
+ * Kobo_monza has touch_mirrored_y (screen y = 1679 - raw X) where the Libra 2
+ * (Kobo_io) has none. Raw X is mirrored before kobo_touch_map. */
+static int touch_mirror_y;
+static int raw_x_mirror(int raw){return raw>=KOBO_TOUCH_MAX_X?0:KOBO_TOUCH_MAX_X-1-raw;}
+static int model_is(const char *prefix){
+ char b[16]={0};FILE *f=fopen("/mnt/onboard/.kobo/version","r");if(!f)return 0;
+ int ok=fgets(b,sizeof(b),f)&&!strncmp(b,prefix,strlen(prefix));fclose(f);return ok;
+}
 static unsigned skipped_events;
 static unsigned rejected_events;
 static int request_control(const char *path,const char *reason){
@@ -71,7 +80,7 @@ static int test_swipe_frame(struct test_swipe *s,struct input_event *ev){
  int x=s->x0+(s->x1-s->x0)*s->step/s->steps,y=s->y0+(s->y1-s->y0)*s->step/s->steps;
  TS_EV(EV_ABS,ABS_MT_SLOT,0);
  if(!s->step)TS_EV(EV_ABS,ABS_MT_TRACKING_ID,4242);
- TS_EV(EV_ABS,ABS_MT_POSITION_X,y*KOBO_FB_SCALE);TS_EV(EV_ABS,ABS_MT_POSITION_Y,x*KOBO_FB_SCALE);TS_EV(EV_SYN,SYN_REPORT,0);
+ TS_EV(EV_ABS,ABS_MT_POSITION_X,touch_mirror_y?raw_x_mirror(y*KOBO_FB_SCALE):y*KOBO_FB_SCALE);TS_EV(EV_ABS,ABS_MT_POSITION_Y,x*KOBO_FB_SCALE);TS_EV(EV_SYN,SYN_REPORT,0);
 #undef TS_EV
  s->step++;return n;
 }
@@ -120,6 +129,7 @@ int main(int argc,char **argv){
  int one_gesture=argc==3&&!strcmp(argv[2],"--one-gesture");if(argc==3&&!interactive&&!one_gesture)return 2;
  char *end;long seconds=strtol(argv[1],&end,10);if(*end || seconds<5 || seconds>(resident?43200:(long_session?1800:180)))return 2;
  if(close_inherited_fds()<0)return 3;setvbuf(stdout,NULL,_IOLBF,0);
+ touch_mirror_y=model_is("N428");
  int independent=access(HANDOFF_LEASE,F_OK)==0;
  struct reader readers[2]={{0}};
  if((independent&&!reading_valid())||(!independent&&find_readers(readers,'T')<0)){
@@ -163,14 +173,24 @@ int main(int argc,char **argv){
 #endif
  // Declared before any goto cleanup: the cleanup path reads them.
  struct edge_light edge={0};struct test_swipe swipe={0};struct rotate_follow rot;rotate_init(&rot,resident);
- int key_fd=-1;struct forma_buttons physical_keys={0};unsigned page_keys=0,key_refreshes=0,key_exits=0,exit_holds=0;int key_refreshed=0,power_home=0;
+ int key_fd=-1,pwr_fd=-1;struct forma_buttons physical_keys={0};unsigned page_keys=0,key_refreshes=0,key_exits=0,exit_holds=0;int key_refreshed=0,power_home=0;
  if(interactive){
   key_fd=open_input_named("gpio-keys",O_RDONLY|O_NONBLOCK);
   char key_name[128]={0};unsigned long key_bits[(KEY_MAX+8*sizeof(long))/(8*sizeof(long))]={0};
   if(key_fd<0 || ioctl(key_fd,EVIOCGNAME(sizeof(key_name)),key_name)<0 || strcmp(key_name,"gpio-keys") || ioctl(key_fd,EVIOCGBIT(EV_KEY,sizeof(key_bits)),key_bits)<0){rc=24;goto cleanup;}
-  const int required[]={193,194,116};for(unsigned k=0;k<3;k++)if(!((key_bits[required[k]/(8*sizeof(long))]>>(required[k]%(8*sizeof(long))))&1)){rc=24;goto cleanup;}
+  const int required[]={193,194,116};
+#define KEY_BIT(bits,c) (((bits)[(c)/(8*sizeof(long))]>>((c)%(8*sizeof(long))))&1)
+  unsigned long pwr_bits[(KEY_MAX+8*sizeof(long))/(8*sizeof(long))]={0};
+  if(!KEY_BIT(key_bits,116)){
+   // Libra Colour (MTK): the power key is its own input device, not part of gpio-keys.
+   pwr_fd=open_input_named("bd71828-pwrkey",O_RDONLY|O_NONBLOCK);
+   if(pwr_fd<0 || ioctl(pwr_fd,EVIOCGBIT(EV_KEY,sizeof(pwr_bits)),pwr_bits)<0 || !KEY_BIT(pwr_bits,116)){rc=24;goto cleanup;}
+  }
+  for(unsigned k=0;k<2;k++)if(!KEY_BIT(key_bits,required[k])){rc=24;goto cleanup;}
   if(ioctl(key_fd,EVIOCGRAB,1)<0 || ioctl(key_fd,EVIOCGKEY(sizeof(key_bits)),key_bits)<0){rc=24;goto cleanup;}
-  unsigned held=0;for(unsigned k=0;k<3;k++)if((key_bits[required[k]/(8*sizeof(long))]>>(required[k]%(8*sizeof(long))))&1)held|=1u<<k;
+  if(pwr_fd>=0 && (ioctl(pwr_fd,EVIOCGRAB,1)<0 || ioctl(pwr_fd,EVIOCGKEY(sizeof(pwr_bits)),pwr_bits)<0)){rc=24;goto cleanup;}
+  if(pwr_fd>=0 && KEY_BIT(pwr_bits,116))key_bits[116/(8*sizeof(long))]|=1ul<<(116%(8*sizeof(long)));
+  unsigned held=0;for(unsigned k=0;k<3;k++)if(KEY_BIT(key_bits,required[k]))held|=1u<<k;
   forma_buttons_init(&physical_keys,held);puts("HOST_FORMA_BUTTONS_READY upper=next lower=previous next_hold_1s=refresh previous_release_3s=screenshot chord_hold_2s=home power_release=exit");
  }
  const char *wipe_setting=getenv("KOBO_PAGE_WIPE");
@@ -189,7 +209,7 @@ int main(int argc,char **argv){
  if(resident)printf("HOST_ROTATE_READY follow=%s\n",rot.enabled?"upright,upside-down":"off");
  if(resident)printf("HOST_EDGE_LIGHT_READY brightness=%s warmth=%s\n",edge.path[0]?edge.path[0]:"off",edge.path[1]?edge.path[1]:"off");
 #ifdef KOBO_TARGET_LIBRA2
- puts("HOST_TOUCH_FORWARD_READY protocol=elan-type-b single-finger=1 axis-transform=swap-profile-scale-clamp");
+ printf("HOST_TOUCH_FORWARD_READY protocol=elan-type-b single-finger=1 axis-transform=swap-profile-scale-clamp%s\n",touch_mirror_y?"-mirror-y":"");
 #else
  puts("HOST_TOUCH_FORWARD_READY protocol=forma-snow single-finger=1 axis-transform=mirror-y-swap-divide-two");
 #endif
@@ -215,14 +235,15 @@ int main(int argc,char **argv){
    if(request_control("/tmp/kobo-android-runtime/lab/interactive-refresh-request","refresh\n")<0){rc=26;goto cleanup;}
    key_refreshed=1;key_refreshes++;puts("HOST_FORMA_KEY_REFRESH_REQUESTED");
   }
-  struct pollfd pollers[2]={{.fd=fd,.events=POLLIN},{.fd=key_fd,.events=POLLIN}};int ready=poll(pollers,key_fd>=0?2:1,100);
+  struct pollfd pollers[3]={{.fd=fd,.events=POLLIN},{.fd=key_fd,.events=POLLIN},{.fd=pwr_fd,.events=POLLIN}};int ready=poll(pollers,3,100);
   if(ready<0){if(errno==EINTR)continue;rc=14;break;}if(!ready){
    double tick=now();
    if(idle_timeout && tick-last_input>=idle_timeout && tick>=next_power_check &&
       !button && !down && !hold.state && !edge.state && !physical_keys.pressed){
     next_power_check=tick+5;
     char status[32];
-    FILE *battery=fopen("/sys/class/power_supply/mc13892_bat/status","r");
+    FILE *battery=fopen("/sys/class/power_supply/bd71827_bat/status","r");
+    if(!battery)battery=fopen("/sys/class/power_supply/mc13892_bat/status","r");
     if(battery){
      int discharging=fgets(status,sizeof(status),battery) && !strcmp(status,"Discharging\n");
      fclose(battery);
@@ -258,9 +279,11 @@ int main(int argc,char **argv){
    }
    continue;
   }
-  if(key_fd>=0 && (pollers[1].revents&(POLLERR|POLLHUP|POLLNVAL))){rc=25;goto cleanup;}
-  if(key_fd>=0 && (pollers[1].revents&POLLIN)){
-   struct input_event key_events[32];ssize_t count=read(key_fd,key_events,sizeof(key_events));
+  for(int kp=1;kp<=2;kp++){
+  int kfd=kp==1?key_fd:pwr_fd;
+  if(kfd>=0 && (pollers[kp].revents&(POLLERR|POLLHUP|POLLNVAL))){rc=25;goto cleanup;}
+  if(kfd>=0 && (pollers[kp].revents&POLLIN)){
+   struct input_event key_events[32];ssize_t count=read(kfd,key_events,sizeof(key_events));
    if(count<=0 || count%sizeof(*key_events)){rc=25;goto cleanup;}
    for(size_t k=0;k<(size_t)count/sizeof(*key_events);k++){
     struct input_event *key=&key_events[k];
@@ -316,6 +339,7 @@ int main(int argc,char **argv){
      page_keys++;printf("HOST_FORMA_PAGE_KEY direction=%s ack=%d sent=%.3f ack_at=%.3f\n",previous?"previous":"next",result,sent,now());
     }
    }
+  }
   }
   if(!(pollers[0].revents&POLLIN))continue;
   n=read(fd,events,sizeof(events));
@@ -381,6 +405,7 @@ int main(int argc,char **argv){
     }
     if(blocked){exit_hold_cancel(&hold);if(edge.state==EDGE_PENDING)edge.state=EDGE_IDLE;else edge_end(&edge,now());blocked_frames++;if(mask&(mask-1))multi_frames++;if(down){if(send_event(sock,3,lastx,lasty,&sequence)<0){rc=19;goto cleanup;}down=0;}continue;}
     xraw=coords[current][0];yraw=coords[current][1];
+    if(touch_mirror_y)xraw=raw_x_mirror(xraw);
     int x,y;if(kobo_touch_map(xraw,yraw,&x,&y)<0){blocked=1;exit_hold_cancel(&hold);continue;}
     rotate_point(&rot,&x,&y);
     if(resident && !down && !hold.state && !edge.state)edge_begin(&edge,x,y,KOBO_FB_WIDTH,60*KOBO_EXIT_HOLD_SCALE,rot.applied==2,now());
@@ -407,6 +432,7 @@ cleanup:
  if(down && send_event(sock,3,lastx,lasty,&sequence)<0)rc=21;
  if(ioctl(fd,EVIOCGRAB,0)<0)rc=22;
  if(key_fd>=0){ioctl(key_fd,EVIOCGRAB,0);close(key_fd);}
+ if(pwr_fd>=0){ioctl(pwr_fd,EVIOCGRAB,0);close(pwr_fd);}
  if(edge.state==EDGE_ACTIVE)edge_end(&edge,now());
  if(resident)printf("HOST_ROTATE_CLOSED applied=%d reports=%u changes=%u failures=%u\n",rot.applied,rot.reports,rot.changes,rot.failures);
  if(resident)printf("HOST_EDGE_LIGHT_CLOSED gestures=%u writes=%u replayed=%u\n",edge.gestures,edge.writes,edge.flushes);

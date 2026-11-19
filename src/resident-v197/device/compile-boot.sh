@@ -23,7 +23,9 @@ r=/tmp/kobo-android-runtime
 base=/mnt/onboard/.adds/kobo-android-lab
 # Modules from the per-kernel set (run-resident-session.sh); none: refuse.
 kmods=$base/kernels/$(uname -r)
-for m in ashmem_linux kobo_madvise;do
+# Built-in ashmem (Libra Colour, MTK 4.9): the module set has no ashmem_linux.ko.
+ashmem_mod=ashmem_linux;[ -f "$kmods/ashmem_linux.ko" ] || { [ -e /sys/class/misc/ashmem ] && ashmem_mod=; }
+for m in $ashmem_mod kobo_madvise;do
  [ -f "$kmods/$m.ko" ] && [ ! -L "$kmods/$m.ko" ] && [ "$(sha256sum "$kmods/$m.ko" | awk '{print $1}')" = "$(awk -v n="$m.ko" '$2==n {print $1}' "$kmods/SHA256SUMS" 2>/dev/null)" ] || { echo "KERNEL_MODULES_MISSING release=$(uname -r) module=$m";exit 2; }
 done
 image=$base/graphics-v197.img;src=$base/fast-v197/bootsrc
@@ -65,7 +67,7 @@ loopdev=$(awk -v root="$r" '$2==root {print $1}' /proc/mounts)
 rm -rf "$r/lab/boot/src" "$r/lab/boot/out.new";mkdir -p "$r/lab/boot/src" "$r/lab/boot/out.new"
 cp "$src"/*.jar "$src/compiled-classes" "$src/preloaded-classes" "$r/lab/boot/src/"
 cp "$src/dex2oat-nodebug" "$r/lab/boot/dex2oat-nodebug";chmod 0755 "$r/lab/boot/dex2oat-nodebug"
-insmod "$kmods/ashmem_linux.ko";ash=1
+[ -z "$ashmem_mod" ] || { insmod "$kmods/ashmem_linux.ko";ash=1; }
 insmod "$kmods/kobo_madvise.ko";vm=1
 for n in ashmem kobo_madvise;do
  dev=$(cat /sys/class/misc/$n/dev);rm -f "$r/dev/$n";mknod "$r/dev/$n" c "${dev%:*}" "${dev#*:}";chmod 0600 "$r/dev/$n"

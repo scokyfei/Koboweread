@@ -1,5 +1,5 @@
 #!/bin/sh
-# WeRead 1.8.8 for Kobo Libra 2: installer, started by the KOReader plugin
+# WeRead 1.8.8 for Kobo Libra 2 / Libra Colour: installer, started by the KOReader plugin
 # (wereadkobo.koplugin) in the background:
 #   sh install.sh PLUGIN_DIR
 # Reads PLUGIN_DIR/payload/ (host.tar.gz, rootfs.tar.xz,
@@ -44,13 +44,15 @@ printf 'running\n' > "$pd/install.state"
 
 progress 1 0 "检查设备"
 [ "$(id -u)" = 0 ] || fail 10 "需要以 root 运行（KOReader 在 Kobo 上本就是 root）"
-case "$(cut -d, -f1 /mnt/onboard/.kobo/version 2>/dev/null)" in N418*) :;; *) fail 11 "这台设备不是 Kobo Libra 2";;esac
+# N418 Libra 2 (i.MX6SLL, kernel 4.1.15); N428 Libra Colour (MT8113, kernel 4.9.77: built-in ashmem, binder32 module).
+case "$(cut -d, -f1 /mnt/onboard/.kobo/version 2>/dev/null)" in N418*|N428*) :;; *) fail 11 "这台设备不是 Kobo Libra 2 或 Libra Colour";;esac
 kver=$(uname -r)
 # kernels.list: "RELEASE FIRMWARE" per kernel this package has modules for.
 grep -q "^$kver " "$pl/kernels.list" 2>/dev/null || fail 12 "这个固件的内核还不受支持（当前内核 $kver；支持的固件：$(awk '{printf "%s ", $2}' "$pl/kernels.list" 2>/dev/null)）"
 [ -x /mnt/onboard/.adds/koreader/luajit ] || fail 13 "KOReader 不在 /mnt/onboard/.adds/koreader"
 
-if grep -q ' /tmp/kobo-android-runtime ' /proc/mounts || [ -e /dev/binder ];then fail 15 "另一个 Android 正在运行，请先关闭";fi
+# The Libra Colour kernel has its own (unused) /dev/binder: our modules mark a running Android.
+if grep -q ' /tmp/kobo-android-runtime ' /proc/mounts || grep -qE '^(binder_linux|ashmem_linux|kobo_madvise) ' /proc/modules;then fail 15 "另一个 Android 正在运行，请先关闭";fi
 for f in host.tar.gz rootfs.tar.xz SHA256SUMS apk-meta dirtimes kernels.list;do [ -f "$pl/$f" ] || fail 16 "安装包缺少 $f";done
 # Host-only upgrade. The transaction directory doubles as the launch guard.
 upgrade=$base/.host-upgrade

@@ -51,6 +51,11 @@ mkdir -p "$t/fw198/classes" "$t/fw198/dex"
 sed -e 's/04d86bcdc1bbd77cab4ecc4d1c04e869d76dbabc79c60c52a707c64fc3e4b75f/351105bda1ac58bc037c2d604982635a24018eb0f9b9964abeb5b84647565f1c/' \
  -e 's/installFlags.getInt(params)|16|2)/installFlags.getInt(params)|16|2|128)/' "$f/InstallProbe.java" > "$t/fw/source/InstallProbe.java"
 grep -q 351105bda1ac58bc037c2d604982635a24018eb0f9b9964abeb5b84647565f1c "$t/fw/source/InstallProbe.java" && grep -q '|16|2|128)' "$t/fw/source/InstallProbe.java"
+# Koboweread-Colour: also accept the official channel-900 build of 1.9.7
+# (download.weread.qq.com/pkg/105/releases/1.9.7.10244588_900.apk): same size,
+# same 20 native libraries, different channel bytes. Same package and signer.
+perl -0pi -e 's/(private static final String WEREAD_SHA="[0-9a-f]{64}";)/$1\n private static boolean wereadDigestOk(String d){return WEREAD_SHA.equals(d)||"fae543b19c935024d5f51ac0d42df00bc6ebb5de2fc197b51bb3131e3b16707d".equals(d);}/; s/!WEREAD_SHA\.equals\(digest\(path\)\)/!wereadDigestOk(digest(path))/; s/!WEREAD_SHA\.equals\(source\)/!wereadDigestOk(source)/' "$t/fw/source/InstallProbe.java"
+[ "$(grep -c wereadDigestOk "$t/fw/source/InstallProbe.java")" = 3 ]
 # The 1.9.7 launcher is no longer persistent (2026-11-08, ended while WeRead is
 # on screen): framework/ActivityLauncher.java accepts a system package without
 # FLAG_PERSISTENT and lets systemReady start it once, for HOME (2026-11-10).

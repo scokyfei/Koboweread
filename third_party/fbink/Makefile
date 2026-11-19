@@ -32,6 +32,9 @@ else
 	RANLIB?=gcc-ranlib
 endif
 
+# For use in recursive calls we don't want `make -n` to follow through.
+SUBMAKE = $(MAKE)
+
 DEBUG_CFLAGS:=-Og -fno-omit-frame-pointer -pipe -g
 # Fallback CFLAGS, we honor the env first and foremost!
 OPT_CFLAGS:=-O2 -fomit-frame-pointer -pipe
@@ -53,6 +56,13 @@ endif
 ifdef DEBUGFLAGS
 	CFLAGS:=$(DEBUG_CFLAGS)
 endif
+
+# Try to use sane defaults for DESTDIR, while still playing nice with PMS
+DESTDIR?=/usr/local
+INCDIR:=$(DESTDIR)/include/fbink
+BINDIR:=$(DESTDIR)/bin
+LIBDIR:=$(DESTDIR)/lib
+DOCDIR:=$(DESTDIR)/share/doc/fbink
 
 # Detect GCC version because reasons...
 # (namely, GCC emitting an error instead of a warning on unknown -W options)
@@ -102,12 +112,9 @@ endif
 
 ifndef DEBUG
 	# Don't hobble GCC just for the sake of being interposable
-	ifdef SHARED
-		ifeq "$(CC_IS_CLANG)" "0"
-			# Applies when building a shared library as well as just PIC in general.
-			# Fun fact: apparently the default on Clang ;).
-			SHARED_CFLAGS+=-fno-semantic-interposition
-		endif
+	ifeq "$(CC_IS_CLANG)" "0"
+		# Fun fact: apparently the default on Clang ;).
+		EXTRA_CFLAGS+=-fno-semantic-interposition
 	endif
 	# Enable loop unrolling & vectorization in the hope it'll do something smart with our pixel loops
 	EXTRA_CFLAGS+=-ftree-vectorize
@@ -173,21 +180,15 @@ ifeq "$(MOAR_WARNIGS)" "1"
 	EXTRA_CFLAGS+=-Wextra -Wunused
 	EXTRA_CFLAGS+=-Wformat=2
 	EXTRA_CFLAGS+=-Wformat-signedness
-	# NOTE: -Wformat-truncation=2 is still a tad too aggressive w/ GCC 9, so, tone it down to avoid false-positives...
+	# NOTE: -Wformat-truncation=2 is still a tad too aggressive w/ GCC 14, so, tone it down to avoid false-positives...
 	EXTRA_CFLAGS+=-Wformat-truncation=1
-	# NOTE: This doesn't really play nice w/ FORTIFY, leading to an assload of false-positives, unless LTO is enabled
-	ifeq (,$(findstring flto,$(CFLAGS)))
-		# NOTE: GCC 9 is more verbose, so nerf that, too, when building w/o LTO on native systems...
-		ifeq "$(CC_IS_CROSS)" "0"
-			EXTRA_CFLAGS+=-Wno-stringop-truncation
-		endif
-	endif
 	EXTRA_CFLAGS+=-Wnull-dereference
 	EXTRA_CFLAGS+=-Wuninitialized
 	ifeq (flto,$(findstring flto,$(CFLAGS)))
 		# NOTE: Inlining put_pixel in fbink_print_ot triggers a few -Wmaybe-uninitialized when we pass grayscale pixels...
 		#       Actually harmless, because they trip in an RGB565 codepath, which we make sure always get fed RGB32.
 		#       Unfortunately, since they're tripped at link-time, I can't pragma'em away :/.
+		#       Doesn't happen on static builds.
 		EXTRA_CFLAGS+=-Wno-maybe-uninitialized
 	endif
 	EXTRA_CFLAGS+=-Wduplicated-branches -Wduplicated-cond
@@ -233,19 +234,24 @@ endif
 # We need to build PIC to support running as/with a shared library
 # NOTE: We should be safe with -fpic instead of -fPIC ;).
 # And we also want to handle symbol visibility sanely...
-ifdef SHARED
-	SHARED_CFLAGS+=-fpic
-	# The symbol visibility shenanigans only make sense for shared builds.
-	# (Unless you *really* want that main symbol to be local in fbink_cmd in static builds ;)).
-	SHARED_CFLAGS+=-fvisibility=hidden
-	# And this ensures that only what needs to be public in the library will actually be.
-	LIB_CFLAGS+=-DFBINK_SHAREDLIB
-endif
+SHARED_CFLAGS+=-fpic
+# The symbol visibility shenanigans only make sense for shared builds.
+# (Unless you *really* want that main symbol to be local in fbink_cmd in static builds ;)).
+SHARED_LIB_CFLAGS+=-fvisibility=hidden
+# And this ensures that only what needs to be public in the library will actually be.
+SHARED_LIB_CFLAGS+=-DFBINK_SHAREDLIB
 
 # Assume we'll be safe to use by threaded applications...
 EXTRA_CPPFLAGS+=-D_REENTRANT=1
 # We're Linux-bound anyway...
 EXTRA_CPPFLAGS+=-D_GNU_SOURCE
+
+# That target is a bit of a hack, so the preprocessor needs to be aware of it to deal with the fallout...
+INPUT_LIB_CFLAGS:=-DFBINK_INPUT_LIB
+# We also need to silence a whole load of -Wunused-function warnings because of that...
+INPUT_LIB_CFLAGS+=-Wno-unused-function
+# We also want LTO enabled for better DCE...
+INPUT_LIB_CFLAGS+=$(LTO_CFLAGS)
 
 # Backward compatibility shenanigan: before FBINK_FOR_KOBO was implemented, we assumed KOBO was the default/fallback platform.
 # Keep honoring that.
@@ -297,35 +303,10 @@ EXTRA_CPPFLAGS+=$(TARGET_CPPFLAGS)
 
 # A version tag...
 # NOTE: Don't redirect stderr, so we can get an idea of what happened when things go wrong...
-FBINK_VERSION:=$(shell git describe || cat VERSION)
+FBINK_VERSION:=$(shell git describe || git rev-parse --short HEAD || cat VERSION)
 # Only use it if we got something useful...
 ifdef FBINK_VERSION
-	ifdef KINDLE
-		LIB_CFLAGS+=-DFBINK_VERSION='"$(FBINK_VERSION) for Kindle"'
-	else
-		ifdef CERVANTES
-			LIB_CFLAGS+=-DFBINK_VERSION='"$(FBINK_VERSION) for Cervantes"'
-		else
-			ifdef LINUX
-				LIB_CFLAGS+=-DFBINK_VERSION='"$(FBINK_VERSION) for Linux"'
-			else
-				ifdef KOBO
-					LIB_CFLAGS+=-DFBINK_VERSION='"$(FBINK_VERSION) for Kobo"'
-				else
-					ifdef REMARKABLE
-						LIB_CFLAGS+=-DFBINK_VERSION='"$(FBINK_VERSION) for reMarkable"'
-					else
-						ifdef POCKETBOOK
-							LIB_CFLAGS+=-DFBINK_VERSION='"$(FBINK_VERSION) for PocketBook"'
-						else
-							# NOTE: Should never happen!
-							LIB_CFLAGS+=-DFBINK_VERSION='"$(FBINK_VERSION)"'
-						endif
-					endif
-				endif
-			endif
-		endif
-	endif
+	LIB_CFLAGS+=-DFBINK_VERSION='"$(FBINK_VERSION)"'
 else
 	# Just so we don't use an empty var down the line...
 	FBINK_VERSION:=dev
@@ -335,31 +316,37 @@ endif
 LDFLAGS?=-Wl,--as-needed
 
 # And we want to link against our own library ;).
-ifdef DEBUG
-	EXTRA_LDFLAGS+=-L./Debug
-else
-	EXTRA_LDFLAGS+=-L./Release
-endif
-ifdef SHARED
-	LIBS+=-lfbink
-else
-	LIBS+=-l:libfbink.a
+EXTRA_LDFLAGS+=-L$(OUT_DIR)
+
+LIBS_FOR_SHARED+=-lfbink
+LIBS_FOR_STATIC+=-l:libfbink.a
+
+# We also want to be able to optionally enforce PIC on static builds...
+ifdef PIC
+	EXTRA_CFLAGS+=$(SHARED_CFLAGS)
 endif
 
 # Pick up our vendored build of libunibreak, if requested
 ifdef UNIBREAK
-	EXTRA_LDFLAGS+=-Llibunibreak-staged/src/.libs
-	LIBS+=-l:libunibreak.a
-	SHARED_LIBS+=-l:libunibreak.a
+	LIB_LDFLAGS+=-Llibunibreak-staged/src/.libs
+	UNIBREAK_LIBS:=-l:libunibreak.a
+	# And also vendor it inside our shared library.
+	# I'm not necessarily a fan of this approach in principle, but it ensures stuff Just Works for library users.
+	# Plus, the default build already does that by picking up the object files manually...
+	SHARED_LIBS+=$(UNIBREAK_LIBS)
+	# NOTE: We do the same for static builds, but the magic happens via partial linking in the staticlib target...
+	STATIC_LIBS+=libunibreak-staged/src/.libs/libunibreak.a
 endif
 
 # Same for libi2c, on Kobo
 ifdef KOBO
-	EXTRA_CPPFLAGS+=-Ilibi2c-staged/include
-	EXTRA_LDFLAGS+=-Llibi2c-staged/lib
+	I2C_CPPFLAGS+=-Ilibi2c-staged/include
+	I2C_LDFLAGS+=-Llibi2c-staged/lib
 	I2C_LIBS:=-l:libi2c.a
-	LIBS+=$(I2C_LIBS)
+	LIB_CPPFLAGS+=$(I2C_CPPFLAGS)
+	LIB_LDFLAGS+=$(I2C_LDFLAGS)
 	SHARED_LIBS+=$(I2C_LIBS)
+	STATIC_LIBS+=libi2c-staged/lib/libi2c.a
 endif
 
 # Pick up our vendored build of libevdev (for the PoC that relies on it)
@@ -400,8 +387,9 @@ endif
 ##
 # Now that we're done fiddling with flags, let's build stuff!
 LIB_SRCS:=fbink.c cutef8/utf8.c cutef8/dfa.c
+LIB_INPUT_SRCS:=fbink_input_scan.c
 # Jump through a few hoops to set a few libunibreak-specific CFLAGS to silence some warnings...
-LIB_UB_SRCS:=libunibreak/src/linebreak.c libunibreak/src/linebreakdata.c libunibreak/src/unibreakdef.c libunibreak/src/linebreakdef.c
+LIB_UB_SRCS:=libunibreak/src/linebreak.c libunibreak/src/linebreakdata.c libunibreak/src/unibreakdef.c libunibreak/src/linebreakdef.c libunibreak/src/eastasianwidthdef.c
 LIB_QT_SRCS:=qimagescale/qimagescale.c
 # We don't need any of that in MINIMAL builds
 ifdef MINIMAL
@@ -424,42 +412,31 @@ else
 	FEATURES_CPPFLAGS+=-DFBINK_WITH_FONTS
 	FEATURES_CPPFLAGS+=-DFBINK_WITH_IMAGE
 	FEATURES_CPPFLAGS+=-DFBINK_WITH_OPENTYPE
-	# Connect button scanning is Kobo specific
-	ifdef KOBO
-		WITH_BUTTON_SCAN:=True
-		FEATURES_CPPFLAGS+=-DFBINK_WITH_BUTTON_SCAN
-	endif
+	FEATURES_CPPFLAGS+=-DFBINK_WITH_INPUT
 	# Unifont is *always* optional, because it'll add almost 2MB to the binary size!
 	ifdef UNIFONT
 		FEATURES_CPPFLAGS+=-DFBINK_WITH_UNIFONT
+	endif
+	# button_scan has been deprecated, so it's now optional
+	ifdef KOBO
+		ifdef BUTTON_SCAN
+			WITH_BUTTON_SCAN:=True
+			FEATURES_CPPFLAGS+=-DFBINK_WITH_BUTTON_SCAN
+		endif
 	endif
 endif
 
 # Manage modular MINIMAL builds...
 ifdef MINIMAL
-	# Support tweaking a MINIMAL build to still include drawing primitives
-	ifdef DRAW
-		FEATURES_CPPFLAGS+=-DFBINK_WITH_DRAW
-	endif
-
-	# Support tweaking a MINIMAL build to still include fixed-cell font rendering
-	ifdef BITMAP
-		# Make sure we actually have drawing support
-		ifndef DRAW
-			FEATURES_CPPFLAGS+=-DFBINK_WITH_DRAW
-		endif
-		FEATURES_CPPFLAGS+=-DFBINK_WITH_BITMAP
-	endif
-
 	# Support tweaking a MINIMAL build to still include extra bitmap fonts
 	ifdef FONTS
 		# Make sure we actually have drawing support
 		ifndef DRAW
-			FEATURES_CPPFLAGS+=-DFBINK_WITH_DRAW
+			DRAW:=1
 		endif
 		# Make sure we actually have fixed-cell support
 		ifndef BITMAP
-			FEATURES_CPPFLAGS+=-DFBINK_WITH_BITMAP
+			BITMAP:=1
 		endif
 		FEATURES_CPPFLAGS+=-DFBINK_WITH_FONTS
 		# As well as, optionally, the full Unifont...
@@ -468,11 +445,20 @@ ifdef MINIMAL
 		endif
 	endif
 
+	# Support tweaking a MINIMAL build to still include fixed-cell font rendering
+	ifdef BITMAP
+		# Make sure we actually have drawing support
+		ifndef DRAW
+			DRAW:=1
+		endif
+		FEATURES_CPPFLAGS+=-DFBINK_WITH_BITMAP
+	endif
+
 	# Support tweaking a MINIMAL build to still include image support
 	ifdef IMAGE
 		# Make sure we actually have drawing support
 		ifndef DRAW
-			FEATURES_CPPFLAGS+=-DFBINK_WITH_DRAW
+			DRAW:=1
 		endif
 		FEATURES_CPPFLAGS+=-DFBINK_WITH_IMAGE
 	endif
@@ -481,7 +467,7 @@ ifdef MINIMAL
 	ifdef OPENTYPE
 		# Make sure we actually have drawing support
 		ifndef DRAW
-			FEATURES_CPPFLAGS+=-DFBINK_WITH_DRAW
+			DRAW:=1
 		endif
 		FEATURES_CPPFLAGS+=-DFBINK_WITH_OPENTYPE
 		ifdef STATIC_LIBM
@@ -494,37 +480,68 @@ ifdef MINIMAL
 	endif
 
 	# Support tweaking a MINIMAL build to still include button scan support
-	ifdef BUTTON_SCAN
-		# Make sure we actually have drawing support
-		ifndef DRAW
-			FEATURES_CPPFLAGS+=-DFBINK_WITH_DRAW
+	ifdef KOBO
+		ifdef BUTTON_SCAN
+			# Make sure we actually have drawing support
+			ifndef DRAW
+				DRAW:=1
+			endif
+			WITH_BUTTON_SCAN:=True
+			FEATURES_CPPFLAGS+=-DFBINK_WITH_BUTTON_SCAN
 		endif
-		WITH_BUTTON_SCAN:=True
-		FEATURES_CPPFLAGS+=-DFBINK_WITH_BUTTON_SCAN
+	endif
+
+	# Support tweaking a MINIMAL build to still include drawing primitives
+	ifdef DRAW
+		FEATURES_CPPFLAGS+=-DFBINK_WITH_DRAW
+	endif
+
+	# Support tweaking a MINIMAL build to still include input utilities
+	ifdef INPUT
+		FEATURES_CPPFLAGS+=-DFBINK_WITH_INPUT
 	endif
 endif
 
 # On the other hand, we want to enforce MINIMAL features for the tools that don't link against FBInk,
 # but instead piggyback on the internal API via fbink.c + LTO...
 TOOLS_CPPFLAGS+=-DFBINK_MINIMAL
+# On Kobo, fbink_rota_quirks.h needs access to the i2c-tools headers
+TOOLS_CPPFLAGS+=$(I2C_CPPFLAGS)
 # Except for doom, because it needs Image support...
 DOOM_CPPFLAGS:=$(TOOLS_CPPFLAGS)
 DOOM_CPPFLAGS+=-DFBINK_WITH_DRAW -DFBINK_WITH_IMAGE
 
+# We also want matching feature sets for our frozen minimal builds for the tools that *do* link against such a static lib
+TINIER_FEATURES:=-DFBINK_MINIMAL
+TINYISH_FEATURES:=-DFBINK_MINIMAL -DFBINK_WITH_INPUT
+TINY_FEATURES:=-DFBINK_MINIMAL -DFBINK_WITH_DRAW -DFBINK_WITH_INPUT
+SMALL_FEATURES:=-DFBINK_MINIMAL -DFBINK_WITH_DRAW -DFBINK_WITH_BITMAP -DFBINK_WITH_IMAGE
+
 # How we handle our library creation
-FBINK_SHARED_FLAGS:=-shared -Wl,-soname,libfbink.so.1
+FBINK_SHARED_LDFLAGS:=-shared -Wl,-soname,libfbink.so.1
 FBINK_SHARED_NAME_FILE:=libfbink.so.1.0.0
 FBINK_SHARED_NAME:=libfbink.so
 FBINK_SHARED_NAME_VER:=libfbink.so.1
-FBINK_STATIC_FLAGS:=rc
+FBINK_STATIC_AR_OPTS:=rc
 FBINK_STATIC_NAME:=libfbink.a
+FBINK_PARTIAL_GCC_OPTS:=-r
+FBINK_PARTIAL_NAME:=libfbink.o
+FBINK_PARTIAL_LDFLAGS:=-Wl,--whole-archive,--no-gc-sections -nostdlib
+# For the standalone libfbink_input variant
+FBINK_INPUT_SHARED_LDFLAGS:=-shared -Wl,-soname,libfbink_input.so.1
+FBINK_INPUT_SHARED_NAME_FILE:=libfbink_input.so.1.0.0
+FBINK_INPUT_SHARED_NAME:=libfbink_input.so
+FBINK_INPUT_SHARED_NAME_VER:=libfbink_input.so.1
+FBINK_INPUT_STATIC_NAME:=libfbink_input.a
 
 default: all
 
 SHAREDLIB_OBJS:=$(addprefix $(OUT_DIR)/shared/, $(LIB_SRCS:.c=.o))
+INPUT_SHAREDLIB_OBJS:=$(addprefix $(OUT_DIR)/shared/, $(LIB_INPUT_SRCS:.c=.o))
 UB_SHAREDLIB_OBJS:=$(addprefix $(OUT_DIR)/shared/, $(LIB_UB_SRCS:.c=.o))
 QT_SHAREDLIB_OBJS:=$(addprefix $(OUT_DIR)/shared/, $(LIB_QT_SRCS:.c=.o))
 STATICLIB_OBJS:=$(addprefix $(OUT_DIR)/static/, $(LIB_SRCS:.c=.o))
+INPUT_STATICLIB_OBJS:=$(addprefix $(OUT_DIR)/static/, $(LIB_INPUT_SRCS:.c=.o))
 UB_STATICLIB_OBJS:=$(addprefix $(OUT_DIR)/static/, $(LIB_UB_SRCS:.c=.o))
 QT_STATICLIB_OBJS:=$(addprefix $(OUT_DIR)/static/, $(LIB_QT_SRCS:.c=.o))
 CMD_OBJS:=$(addprefix $(OUT_DIR)/, $(CMD_SRCS:.c=.o))
@@ -532,9 +549,13 @@ BTN_OBJS:=$(addprefix $(OUT_DIR)/, $(BTN_SRCS:.c=.o))
 
 # Silence a few warnings, only when specifically compiling libunibreak...
 # c.f., https://stackoverflow.com/q/1305665
-UNIBREAK_CFLAGS:=-Wno-conversion -Wno-sign-conversion -Wno-suggest-attribute=pure
+UNIBREAK_CFLAGS:=-Wno-conversion -Wno-cast-align -Wno-suggest-attribute=pure
 $(UB_SHAREDLIB_OBJS): QUIET_CFLAGS:=$(UNIBREAK_CFLAGS)
 $(UB_STATICLIB_OBJS): QUIET_CFLAGS:=$(UNIBREAK_CFLAGS)
+
+# And when building libfbink_input standalone
+$(INPUT_SHAREDLIB_OBJS): QUIET_CFLAGS:=$(INPUT_LIB_CFLAGS)
+$(INPUT_STATICLIB_OBJS): QUIET_CFLAGS:=$(INPUT_LIB_CFLAGS)
 
 # Silence a few warnings when building libi2c
 I2C_CFLAGS:=-Wno-sign-conversion
@@ -546,27 +567,36 @@ EVDEV_CFLAGS+=-Wno-suggest-attribute=pure -Wno-suggest-attribute=const -Wno-padd
 # And when *linking* libevdev (w/ LTO)
 EVDEV_LDFLAGS+=-Wno-null-dereference
 
+# Don't pollute our own exported symbols with vendored libraries'
+UNIBREAK_CFLAGS+=-fvisibility=hidden
+I2C_CFLAGS+=-fvisibility=hidden
+EVDEV_CFLAGS+=-fvisibility=hidden
+
 # Shared lib
 $(OUT_DIR)/shared/%.o: %.c
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(QUIET_CFLAGS) $(SHARED_CFLAGS) $(LIB_CFLAGS) -o $@ -c $<
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(LIB_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(QUIET_CFLAGS) $(SHARED_CFLAGS) $(SHARED_LIB_CFLAGS) $(LIB_CFLAGS) -o $@ -c $<
 
 # Static lib
 $(OUT_DIR)/static/%.o: %.c
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(QUIET_CFLAGS) $(SHARED_CFLAGS) $(LIB_CFLAGS) -o $@ -c $<
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(LIB_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(QUIET_CFLAGS) $(LIB_CFLAGS) -o $@ -c $<
 
 # CLI front-end
 $(OUT_DIR)/%.o: %.c
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) -o $@ -c $<
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ -c $<
 
-outdir:
-	mkdir -p $(OUT_DIR)/shared/cutef8 $(OUT_DIR)/static/cutef8 $(OUT_DIR)/shared/libunibreak/src $(OUT_DIR)/static/libunibreak/src $(OUT_DIR)/shared/qimagescale $(OUT_DIR)/static/qimagescale
+outdir: $(OUT_DIR)/shared/cutef8/ $(OUT_DIR)/static/cutef8/ $(OUT_DIR)/shared/libunibreak/src/ $(OUT_DIR)/static/libunibreak/src/ $(OUT_DIR)/shared/qimagescale/ $(OUT_DIR)/static/qimagescale/
+
+$(OUT_DIR)/%/:
+	mkdir -p "$@"
 
 # Make absolutely sure we create our output directories first, even with unfortunate // timings!
 # c.f., https://www.gnu.org/software/make/manual/html_node/Prerequisite-Types.html#Prerequisite-Types
 $(SHAREDLIB_OBJS): libi2c.built | outdir
+$(INPUT_SHAREDLIB_OBJS): libi2c.built | outdir
 $(UB_SHAREDLIB_OBJS): | outdir
 $(QT_SHAREDLIB_OBJS): | outdir
 $(STATICLIB_OBJS): libi2c.built | outdir
+$(INPUT_STATICLIB_OBJS): libi2c.built | outdir
 $(UB_STATICLIB_OBJS): | outdir
 $(QT_STATICLIB_OBJS): | outdir
 $(CMD_OBJS): | outdir
@@ -575,45 +605,90 @@ $(BTN_OBJS): | outdir
 all: static
 
 ifdef UNIBREAK
-staticlib: $(STATICLIB_OBJS) libunibreak.built
-	$(AR) $(FBINK_STATIC_FLAGS) $(OUT_DIR)/$(FBINK_STATIC_NAME) $(STATICLIB_OBJS)
-	$(RANLIB) $(OUT_DIR)/$(FBINK_STATIC_NAME)
+# Plain FBInk archive
+$(OUT_DIR)/static/$(FBINK_STATIC_NAME): $(STATICLIB_OBJS) $(QT_STATICLIB_OBJS) libunibreak.built
+	$(AR) $(FBINK_STATIC_AR_OPTS) $@ $(STATICLIB_OBJS) $(QT_STATICLIB_OBJS)
 
-sharedlib: $(SHAREDLIB_OBJS) libunibreak.built
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LIB_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) $(FBINK_SHARED_FLAGS) -o$(OUT_DIR)/$(FBINK_SHARED_NAME_FILE) $(SHAREDLIB_OBJS)
-	ln -sf $(FBINK_SHARED_NAME_FILE) $(OUT_DIR)/$(FBINK_SHARED_NAME)
-	ln -sf $(FBINK_SHARED_NAME_FILE) $(OUT_DIR)/$(FBINK_SHARED_NAME_VER)
+$(OUT_DIR)/$(FBINK_SHARED_NAME_FILE): $(SHAREDLIB_OBJS) $(QT_SHAREDLIB_OBJS) libunibreak.built
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(SHARED_LIB_CFLAGS) $(LIB_CFLAGS) $(LDFLAGS) $(LIB_LDFLAGS) $(EXTRA_LDFLAGS) $(FBINK_SHARED_LDFLAGS) -o $@ $(SHAREDLIB_OBJS) $(QT_SHAREDLIB_OBJS) $(SHARED_LIBS)
 else
-staticlib: $(STATICLIB_OBJS) $(UB_STATICLIB_OBJS) $(QT_STATICLIB_OBJS)
-	$(AR) $(FBINK_STATIC_FLAGS) $(OUT_DIR)/$(FBINK_STATIC_NAME) $(STATICLIB_OBJS) $(UB_STATICLIB_OBJS) $(QT_STATICLIB_OBJS)
-	$(RANLIB) $(OUT_DIR)/$(FBINK_STATIC_NAME)
+# Plain FBInk archive
+$(OUT_DIR)/static/$(FBINK_STATIC_NAME): $(STATICLIB_OBJS) $(UB_STATICLIB_OBJS) $(QT_STATICLIB_OBJS)
+	$(AR) $(FBINK_STATIC_AR_OPTS) $@ $^
 
-sharedlib: $(SHAREDLIB_OBJS) $(UB_SHAREDLIB_OBJS) $(QT_SHAREDLIB_OBJS)
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LIB_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) $(FBINK_SHARED_FLAGS) -o$(OUT_DIR)/$(FBINK_SHARED_NAME_FILE) $(SHAREDLIB_OBJS) $(UB_SHAREDLIB_OBJS) $(QT_SHAREDLIB_OBJS) $(SHARED_LIBS)
-	ln -sf $(FBINK_SHARED_NAME_FILE) $(OUT_DIR)/$(FBINK_SHARED_NAME)
-	ln -sf $(FBINK_SHARED_NAME_FILE) $(OUT_DIR)/$(FBINK_SHARED_NAME_VER)
+$(OUT_DIR)/$(FBINK_SHARED_NAME_FILE): $(SHAREDLIB_OBJS) $(UB_SHAREDLIB_OBJS) $(QT_SHAREDLIB_OBJS)
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(SHARED_LIB_CFLAGS) $(LIB_CFLAGS) $(LDFLAGS) $(LIB_LDFLAGS) $(EXTRA_LDFLAGS) $(FBINK_SHARED_LDFLAGS) -o $@ $^ $(SHARED_LIBS)
 endif
+
+# No partial linking necessary here
+$(OUT_DIR)/$(FBINK_INPUT_STATIC_NAME): $(INPUT_STATICLIB_OBJS)
+	$(AR) $(FBINK_STATIC_AR_OPTS) $@ $^
+	$(RANLIB) $@
+
+$(OUT_DIR)/$(FBINK_INPUT_SHARED_NAME_FILE): $(INPUT_SHAREDLIB_OBJS)
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(SHARED_LIB_CFLAGS) $(LIB_CFLAGS) $(LDFLAGS) $(LIB_LDFLAGS) $(EXTRA_LDFLAGS) $(FBINK_INPUT_SHARED_LDFLAGS) -o $@ $^ $(SHARED_LIBS)
+
+# Vendor in our dependencies
+$(OUT_DIR)/static/$(FBINK_PARTIAL_NAME): $(OUT_DIR)/static/$(FBINK_STATIC_NAME)
+	$(CC) $(FBINK_PARTIAL_GCC_OPTS) -o $@ $(CFLAGS) $(EXTRA_CFLAGS) $(LDFLAGS) $(FBINK_PARTIAL_LDFLAGS) $< $(STATIC_LIBS)
+# Final static archive
+$(OUT_DIR)/$(FBINK_STATIC_NAME): $(OUT_DIR)/static/$(FBINK_PARTIAL_NAME)
+	$(AR) $(FBINK_STATIC_AR_OPTS) $@ $<
+	$(RANLIB) $@
+
+$(OUT_DIR)/$(FBINK_SHARED_NAME_VER): $(OUT_DIR)/$(FBINK_SHARED_NAME_FILE)
+	ln -sf $(FBINK_SHARED_NAME_FILE) $@
+$(OUT_DIR)/$(FBINK_SHARED_NAME): $(OUT_DIR)/$(FBINK_SHARED_NAME_VER)
+	ln -sf $(FBINK_SHARED_NAME_VER) $@
+
+$(OUT_DIR)/$(FBINK_INPUT_SHARED_NAME_VER): $(OUT_DIR)/$(FBINK_INPUT_SHARED_NAME_FILE)
+	ln -sf $(FBINK_INPUT_SHARED_NAME_FILE) $@
+$(OUT_DIR)/$(FBINK_INPUT_SHARED_NAME): $(OUT_DIR)/$(FBINK_INPUT_SHARED_NAME_VER)
+	ln -sf $(FBINK_INPUT_SHARED_NAME_VER) $@
+
+staticlib: $(OUT_DIR)/$(FBINK_STATIC_NAME)
+sharedlib: $(OUT_DIR)/$(FBINK_SHARED_NAME_VER) $(OUT_DIR)/$(FBINK_SHARED_NAME)
+
+staticinputlib: $(OUT_DIR)/$(FBINK_INPUT_STATIC_NAME)
+sharedinputlib: $(OUT_DIR)/$(FBINK_INPUT_SHARED_NAME_VER) $(OUT_DIR)/$(FBINK_INPUT_SHARED_NAME)
+
+# NOTE: We keep FEATURES_CPPFLAGS solely to handle ifdeffery crap ;)
+$(OUT_DIR)/static/fbink: $(OUT_DIR)/$(FBINK_STATIC_NAME) $(CMD_OBJS)
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o $@ $(CMD_OBJS) $(LIBS_FOR_STATIC) $(LIBS)
+
+$(OUT_DIR)/static/button_scan: $(OUT_DIR)/$(FBINK_STATIC_NAME) $(BTN_OBJS)
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o $@ $(BTN_OBJS) $(LIBS_FOR_STATIC) $(LIBS)
 
 ifdef WITH_BUTTON_SCAN
-staticbin: $(OUT_DIR)/$(FBINK_STATIC_NAME) $(CMD_OBJS) $(BTN_OBJS)
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/fbink $(CMD_OBJS) $(LIBS)
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/button_scan $(BTN_OBJS) $(LIBS)
+staticbin: $(OUT_DIR)/static/fbink $(OUT_DIR)/static/button_scan
+	ln -f $(OUT_DIR)/static/fbink $(OUT_DIR)/fbink
+	ln -f $(OUT_DIR)/static/button_scan $(OUT_DIR)/button_scan
 else
-staticbin: $(OUT_DIR)/$(FBINK_STATIC_NAME) $(CMD_OBJS)
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/fbink $(CMD_OBJS) $(LIBS)
+staticbin: $(OUT_DIR)/static/fbink
+	ln -f $< $(OUT_DIR)/fbink
 endif
+
+# NOTE: Ditto
+$(OUT_DIR)/shared/fbink: $(OUT_DIR)/$(FBINK_SHARED_NAME) $(OUT_DIR)/$(FBINK_SHARED_NAME_VER) $(CMD_OBJS)
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o $@ $(CMD_OBJS) $(LIBS_FOR_SHARED) $(LIBS)
+
+$(OUT_DIR)/shared/button_scan: $(OUT_DIR)/$(FBINK_SHARED_NAME) $(OUT_DIR)/$(FBINK_SHARED_NAME_VER) $(BTN_OBJS)
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o $@ $(BTN_OBJS) $(LIBS_FOR_SHARED) $(LIBS)
 
 ifdef WITH_BUTTON_SCAN
-sharedbin: $(OUT_DIR)/$(FBINK_SHARED_NAME_FILE) $(CMD_OBJS) $(BTN_OBJS)
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/fbink $(CMD_OBJS) $(LIBS)
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/button_scan $(BTN_OBJS) $(LIBS)
+sharedbin: $(OUT_DIR)/shared/fbink $(OUT_DIR)/shared/button_scan
+	ln -f $(OUT_DIR)/shared/fbink $(OUT_DIR)/fbink
+	ln -f $(OUT_DIR)/shared/button_scan $(OUT_DIR)/button_scan
 else
-sharedbin: $(OUT_DIR)/$(FBINK_SHARED_NAME_FILE) $(CMD_OBJS)
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/fbink $(CMD_OBJS) $(LIBS)
+sharedbin: $(OUT_DIR)/shared/fbink
+	ln -f $< $(OUT_DIR)/fbink
 endif
 
-striplib: $(OUT_DIR)/$(FBINK_SHARED_NAME_FILE)
+striplib: $(OUT_DIR)/$(FBINK_SHARED_NAME) $(OUT_DIR)/$(FBINK_SHARED_NAME_VER)
 	$(STRIP) --strip-unneeded $(OUT_DIR)/$(FBINK_SHARED_NAME_FILE)
+
+stripinputlib: $(OUT_DIR)/$(FBINK_INPUT_SHARED_NAME) $(OUT_DIR)/$(FBINK_INPUT_SHARED_NAME_VER)
+	$(STRIP) --strip-unneeded $(OUT_DIR)/$(FBINK_INPUT_SHARED_NAME_FILE)
 
 # NOTE: Unless you *really* need to, I don't recommend stripping LTO archives,
 #       strip a binary linked against the untouched archive instead.
@@ -624,7 +699,7 @@ striparchive: $(OUT_DIR)/$(FBINK_STATIC_NAME)
 	$(RANLIB) $(OUT_DIR)/$(FBINK_STATIC_NAME)
 
 ifdef WITH_BUTTON_SCAN
-stripbin: $(OUT_DIR)/fbink
+stripbin:
 	$(STRIP) --strip-unneeded $(OUT_DIR)/fbink
 	$(STRIP) --strip-unneeded $(OUT_DIR)/button_scan
 else
@@ -634,42 +709,61 @@ endif
 
 ifdef LINUX
 utils: | outdir
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(DOOM_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LIB_CFLAGS) $(LTO_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/doom utils/doom.c -lrt
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(DOOM_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(LIB_CFLAGS) $(LTO_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/doom utils/doom.c -lrt -lm
 else
 utils: libi2c.built | outdir
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(TOOLS_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LIB_CFLAGS) $(LTO_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/rota utils/rota.c
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(TOOLS_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(LIB_CFLAGS) $(LTO_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/rota utils/rota.c
 	$(STRIP) --strip-unneeded $(OUT_DIR)/rota
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(DOOM_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LIB_CFLAGS) $(LTO_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/doom utils/doom.c -lrt $(UTILS_LIBS) $(I2C_LIBS)
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(DOOM_CPPFLAGS) $(I2C_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(LIB_CFLAGS) $(LTO_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) $(I2C_LDFLAGS) -o$(OUT_DIR)/doom utils/doom.c -lrt $(UTILS_LIBS) $(I2C_LIBS)
 	$(STRIP) --strip-unneeded $(OUT_DIR)/doom
 endif
 
+# NOTE: That's a dumb little tool that was used to ease the migration to less convoluted rotation quirks handling...
+#       As such, it's native, but tailored to a Kobo target...
+rota_map: libi2c.built | outdir
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) -DFBINK_MINIMAL -DFBINK_FOR_KOBO $(I2C_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(LIB_CFLAGS) $(LTO_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/rota_map tools/rota_map.c
+	$(STRIP) --strip-unneeded $(OUT_DIR)/rota_map
+
 ifdef KOBO
 alt: libi2c.built | outdir
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(DOOM_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LIB_CFLAGS) $(LTO_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/alt_buffer utils/alt_buffer.c $(I2C_LIBS)
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(DOOM_CPPFLAGS) $(I2C_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(LIB_CFLAGS) $(LTO_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) $(I2C_LDFLAGS) -o$(OUT_DIR)/alt_buffer utils/alt_buffer.c $(I2C_LIBS)
 	$(STRIP) --strip-unneeded $(OUT_DIR)/alt_buffer
 endif
 
 ifdef KOBO
 sunxi: libi2c.built | outdir
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/ion_heaps utils/ion_heaps.c
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/ion_heaps utils/ion_heaps.c
 	$(STRIP) --strip-unneeded $(OUT_DIR)/ion_heaps
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/kx122_i2c utils/kx122_i2c.c $(I2C_LIBS)
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(I2C_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) $(I2C_LDFLAGS) -o$(OUT_DIR)/kx122_i2c utils/kx122_i2c.c $(I2C_LIBS)
 	$(STRIP) --strip-unneeded $(OUT_DIR)/kx122_i2c
 endif
 
 ifdef KOBO
-ftrace: libevdev.built tiny | outdir
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(EVDEV_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) $(EVDEV_LDFLAGS) -o$(OUT_DIR)/finger_trace utils/finger_trace.c $(LIBS) $(EVDEV_LIBS)
-	$(STRIP) --strip-unneeded $(OUT_DIR)/finger_trace
+$(OUT_DIR)/finger_trace: libevdev.built tiny.built
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(EVDEV_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) $(EVDEV_LDFLAGS) -o $@ utils/finger_trace.c $(LIBS_FOR_STATIC) $(EVDEV_LIBS) $(LIBS)
+	$(STRIP) --strip-unneeded $@
+
+ftrace: $(OUT_DIR)/finger_trace
 endif
 
-fbdepth: tinier
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LIB_CFLAGS) $(LTO_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/fbdepth utils/fbdepth.c $(LIBS)
-	$(STRIP) --strip-unneeded $(OUT_DIR)/fbdepth
+# NOTE: Same as the CLI tool, we keep FEATURES_CPPFLAGS (via *_FEATURES) for ifdef handling
+$(OUT_DIR)/fbdepth: tinier.built
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(TINIER_FEATURES) $(CFLAGS) $(EXTRA_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o $@ utils/fbdepth.c $(LIBS_FOR_STATIC) $(LIBS)
+	$(STRIP) --strip-unneeded $@
 
-dump: static
-	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(FEATURES_CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(LIB_CFLAGS) $(LTO_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o$(OUT_DIR)/dump utils/dump.c $(LIBS)
-	$(STRIP) --strip-unneeded $(OUT_DIR)/dump
+fbdepth: $(OUT_DIR)/fbdepth
+
+$(OUT_DIR)/input_scan: tinyish.built
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(TINYISH_FEATURES) $(CFLAGS) $(EXTRA_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o $@ utils/input_scan.c $(LIBS_FOR_STATIC) $(LIBS)
+	$(STRIP) --strip-unneeded $@
+
+input_scan: $(OUT_DIR)/input_scan
+
+$(OUT_DIR)/dump: small.built
+	$(CC) $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(SMALL_FEATURES) $(CFLAGS) $(EXTRA_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o $@ utils/dump.c $(LIBS_FOR_STATIC) $(LIBS)
+	$(STRIP) --strip-unneeded $@
+
+dump: $(OUT_DIR)/dump
 
 strip: static
 	$(MAKE) stripbin
@@ -681,24 +775,43 @@ static:
 	$(MAKE) staticlib
 	$(MAKE) staticbin
 
-tiny:
-	$(MAKE) staticlib MINIMAL=true DRAW=true
-
-tinier:
+tinier tinier.built:
+	$(MAKE) cleanstaticlib
 	$(MAKE) staticlib MINIMAL=true
+	touch tinier.built
+
+tinyish tinyish.built:
+	$(MAKE) cleanstaticlib
+	$(MAKE) staticlib MINIMAL=true INPUT=true
+	touch tinyish.built
+
+tiny tiny.built:
+	$(MAKE) cleanstaticlib
+	$(MAKE) staticlib MINIMAL=true DRAW=true INPUT=true
+	touch tiny.built
+
+small small.built:
+	$(MAKE) cleanstaticlib
+	$(MAKE) staticlib MINIMAL=true BITMAP=true IMAGE=true
+	touch small.built
 
 # NOTE: This one may be a bit counter-intuitive... It's to build a static library built like if it were shared (i.e., PIC),
 #       because apparently that's a requirement for FFI in some high-level languages (i.e., Go; c.f., #7)
 pic:
-	$(MAKE) staticlib SHARED=true
+	$(MAKE) staticlib PIC=true
 
 shared:
-	$(MAKE) sharedlib SHARED=true
-	$(MAKE) sharedbin SHARED=true STANDALONE=true
+	$(MAKE) sharedlib
+	$(MAKE) sharedbin STANDALONE=true
 
 release: shared
 	$(MAKE) striplib
 	$(MAKE) stripbin
+
+inputlib:
+	$(MAKE) cleansharedlib
+	$(MAKE) sharedinputlib MINIMAL=true INPUT=true
+	$(MAKE) stripinputlib
 
 kindle:
 	$(MAKE) strip KINDLE=true
@@ -724,44 +837,49 @@ libunibreak.built:
 	cd libunibreak && \
 	env NOCONFIGURE=1 ./autogen.sh
 	cd libunibreak-staged && \
-	env CPPFLAGS="$(CPPFLAGS) $(EXTRA_CPPFLAGS)" \
-	CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(UNIBREAK_CFLAGS)" \
-	LDFLAGS="$(LDFLAGS)" \
-	../libunibreak/configure \
+	env CPPFLAGS='$(CPPFLAGS) $(EXTRA_CPPFLAGS)' \
+	CFLAGS='$(CFLAGS) $(EXTRA_CFLAGS) $(UNIBREAK_CFLAGS)' \
+	LDFLAGS='$(LDFLAGS)' \
+	"$$OLDPWD/libunibreak/configure" \
 	$(if $(CROSS_TC),--host=$(CROSS_TC),) \
 	--enable-static \
 	--disable-shared \
-	$(if $(SHARED),--with-pic=yes,)
-	$(MAKE) -C libunibreak-staged
-	touch libunibreak.built
+	$(if $(PIC),--with-pic=yes,)
+	$(SUBMAKE) -C libunibreak-staged
+	touch "$@"
 
 libi2c.built:
 	mkdir -p libi2c-staged
 	$(MAKE) -C i2c-tools \
 	BUILD_DYNAMIC_LIB=0 USE_STATIC_LIB=1 BUILD_STATIC_LIB=1 V=1 \
-	CC=$(CC) AR=$(AR) \
-	CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(I2C_CFLAGS)" \
-	PREFIX="/" libdir="/lib" DESTDIR="$(CURDIR)/libi2c-staged" \
+	CC='$(CC)' AR='$(AR)' \
+	CFLAGS='$(CFLAGS) $(EXTRA_CFLAGS) $(I2C_CFLAGS)' \
+	PREFIX="/" libdir="/lib" DESTDIR='$(CURDIR)/libi2c-staged' \
 	install-lib install-include
-	touch libi2c.built
+	touch "$@"
 
 libevdev.built:
 	mkdir -p libevdev-staged
 	cd libevdev && \
 	autoreconf -fi && \
-	env CPPFLAGS="$(CPPFLAGS) $(EXTRA_CPPFLAGS)" \
-	CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS) $(SHARED_CFLAGS) $(EVDEV_CFLAGS)" \
-	LDFLAGS="$(LDFLAGS)" \
+	env CPPFLAGS='$(CPPFLAGS) $(EXTRA_CPPFLAGS)' \
+	CFLAGS='$(CFLAGS) $(EXTRA_CFLAGS) $(EVDEV_CFLAGS)' \
+	LDFLAGS='$(LDFLAGS)' \
 	./configure $(if $(CROSS_TC),--host=$(CROSS_TC),) \
-	--prefix="$(CURDIR)/libevdev-staged" \
+	--prefix='$(CURDIR)/libevdev-staged' \
 	--enable-static \
 	--disable-shared && \
-	$(MAKE) install
-	touch libevdev.built
+	$(SUBMAKE) install
+	touch "$@"
 
+ifeq "$(CC_IS_CLANG)" "1"
+armcheck:
+	$(warning Using a Clang TC, assuming it's setup properly for cross-compilation)
+else
 armcheck:
 ifeq (,$(findstring arm-,$(CC)))
 	$(error You forgot to setup a cross TC, you dummy!)
+endif
 endif
 
 kobo: armcheck
@@ -772,8 +890,7 @@ kobo: armcheck
 	mkdir -p Kobo/usr/local/fbink/bin Kobo/usr/bin Kobo/usr/local/fbink/lib Kobo/usr/local/fbink/include
 	cp -av $(CURDIR)/Release/fbink Kobo/usr/local/fbink/bin
 	ln -sf /usr/local/fbink/bin/fbink Kobo/usr/bin/fbink
-	cp -av $(CURDIR)/Release/button_scan Kobo/usr/local/fbink/bin
-	ln -sf /usr/local/fbink/bin/button_scan Kobo/usr/bin/button_scan
+	-cp -av $(CURDIR)/Release/button_scan Kobo/usr/local/fbink/bin && ln -sf /usr/local/fbink/bin/button_scan Kobo/usr/bin/button_scan
 	mv -v $(CURDIR)/fbdepth  Kobo/usr/local/fbink/bin
 	cp -av $(CURDIR)/Release/doom Kobo/usr/local/fbink/bin
 	cp -av $(CURDIR)/Release/$(FBINK_SHARED_NAME_FILE) Kobo/usr/local/fbink/lib
@@ -796,6 +913,9 @@ devcap: armcheck distclean
 	$(MAKE) fbdepth KOBO=true
 	mv -v $(CURDIR)/Release/fbdepth $(CURDIR)/fbdepth
 	$(MAKE) clean
+	$(MAKE) input_scan KOBO=true
+	mv -v $(CURDIR)/Release/input_scan $(CURDIR)/input_scan
+	$(MAKE) clean
 	$(MAKE) ftrace KOBO=true
 	mv -v $(CURDIR)/Release/finger_trace $(CURDIR)/finger_trace
 	$(MAKE) clean
@@ -805,6 +925,7 @@ devcap: armcheck distclean
 	cp -av $(CURDIR)/utils/devcap_test.sh Kobo
 	cp -av $(CURDIR)/Release/fbink Kobo
 	mv -v $(CURDIR)/fbdepth Kobo
+	mv -v $(CURDIR)/input_scan Kobo
 	mv -v $(CURDIR)/finger_trace Kobo
 	cp -av $(CURDIR)/Release/rota Kobo
 	wget "https://svn.ak-team.com/svn/Configs/trunk/Kindle/Kobo_Hacks/USBNetwork/src/usbnet/bin/evtest" -O Kobo/evtest
@@ -814,6 +935,27 @@ devcap: armcheck distclean
 	wget "https://svn.ak-team.com/svn/Configs/trunk/Kindle/Kobo_Hacks/USBNetwork/src/usbnet/lib/libpng16.so.16" -O Kobo/libpng16.so.16
 	wget "https://svn.ak-team.com/svn/Configs/trunk/Kindle/Kobo_Hacks/USBNetwork/src/usbnet/lib/libz.so.1" -O Kobo/libz.so.1
 	tar --owner=root --group=root -cvzf Release/Kobo-DevCap-Test.tar.gz -C Kobo .
+
+ci: armcheck distclean
+	$(MAKE) fbdepth KOBO=true
+	mv -v $(CURDIR)/Release/fbdepth $(CURDIR)/fbdepth
+	$(MAKE) clean
+	$(MAKE) input_scan KOBO=true
+	mv -v $(CURDIR)/Release/input_scan $(CURDIR)/input_scan
+	$(MAKE) clean
+	$(MAKE) ftrace KOBO=true
+	mv -v $(CURDIR)/Release/finger_trace $(CURDIR)/finger_trace
+	$(MAKE) clean
+	$(MAKE) strip KOBO=true
+	mkdir -p Kobo
+	cp -av $(CURDIR)/Release/fbink Kobo
+	mv -v $(CURDIR)/fbdepth Kobo
+	mv -v $(CURDIR)/input_scan Kobo
+	mv -v $(CURDIR)/finger_trace Kobo
+	cp -av $(CURDIR)/README.md Kobo/README.md
+	cp -av $(CURDIR)/LICENSE Kobo/LICENSE
+	cp -av $(CURDIR)/CREDITS Kobo/CREDITS
+	tar --owner=root --group=root -cvzf Release/FBInk-Kobo-$(FBINK_VERSION).tar.gz -C Kobo .
 
 libunibreakclean:
 	-$(MAKE) -C libunibreak distclean
@@ -833,75 +975,60 @@ libevdevclean:
 	git reset --hard && \
 	git clean -fxdq
 
-clean:
+cleansharedlib:
+	rm -rf $(OUT_DIR)/*.so*
+	rm -rf $(OUT_DIR)/shared/*.o
+	rm -rf $(OUT_DIR)/shared/*.opt.yaml
+	rm -rf $(OUT_DIR)/shared/cutef8/*.o
+	rm -rf $(OUT_DIR)/shared/cutef8/*.opt.yaml
+	rm -rf $(OUT_DIR)/shared/libunibreak/src/*.o
+	rm -rf $(OUT_DIR)/shared/libunibreak/src/*.opt.yaml
+	rm -rf $(OUT_DIR)/shared/qimagescale/*.o
+	rm -rf $(OUT_DIR)/shared/qimagescale/*.opt.yaml
+	rm -rf $(OUT_DIR)/shared/utf8
+
+cleanstaticlib:
+	rm -rf $(OUT_DIR)/*.a
+	rm -rf $(OUT_DIR)/static/$(FBINK_PARTIAL_NAME)
+	rm -rf $(OUT_DIR)/static/*.a
+	rm -rf $(OUT_DIR)/static/*.o
+	rm -rf $(OUT_DIR)/static/*.opt.yaml
+	rm -rf $(OUT_DIR)/static/cutef8/*.o
+	rm -rf $(OUT_DIR)/static/cutef8/*.opt.yaml
+	rm -rf $(OUT_DIR)/static/libunibreak/src/*.o
+	rm -rf $(OUT_DIR)/static/libunibreak/src/*.opt.yaml
+	rm -rf $(OUT_DIR)/static/qimagescale/*.o
+	rm -rf $(OUT_DIR)/static/qimagescale/*.opt.yaml
+	rm -rf $(OUT_DIR)/static/utf8
+	rm -rf small.built
+	rm -rf tiny.built
+	rm -rf tinyish.built
+	rm -rf tinier.built
+
+cleanlib: cleansharedlib cleanstaticlib
+
+clean: cleanlib
 	rm -rf Kobo/
-	rm -rf Release/*.a
-	rm -rf Release/*.so*
-	rm -rf Release/shared/*.o
-	rm -rf Release/shared/*.opt.yaml
-	rm -rf Release/shared/cutef8/*.o
-	rm -rf Release/shared/cutef8/*.opt.yaml
-	rm -rf Release/shared/libunibreak/src/*.o
-	rm -rf Release/shared/libunibreak/src/*.opt.yaml
-	rm -rf Release/shared/qimagescale/*.o
-	rm -rf Release/shared/qimagescale/*.opt.yaml
-	rm -rf Release/shared/utf8
-	rm -rf Release/static/*.o
-	rm -rf Release/static/*.opt.yaml
-	rm -rf Release/static/cutef8/*.o
-	rm -rf Release/static/cutef8/*.opt.yaml
-	rm -rf Release/static/libunibreak/src/*.o
-	rm -rf Release/static/libunibreak/src/*.opt.yaml
-	rm -rf Release/static/qimagescale/*.o
-	rm -rf Release/static/qimagescale/*.opt.yaml
-	rm -rf Release/static/utf8
-	rm -rf Release/*.o
-	rm -rf Release/*.opt.yaml
-	rm -rf Release/fbink
-	rm -rf Release/button_scan
-	rm -rf Release/rota
-	rm -rf Release/fbdepth
-	rm -rf Release/alt_buffer
-	rm -rf Release/doom
-	rm -rf Release/dump
-	rm -rf Release/Kobo-DevCap-Test.tar.gz
-	rm -rf Release/kx122_i2c
-	rm -rf Release/ion_heaps
-	rm -rf Release/finger_trace
-	rm -rf Release/FBInk-*.tar.xz
-	rm -rf Debug/*.a
-	rm -rf Debug/*.so*
-	rm -rf Debug/shared/*.o
-	rm -rf Debug/shared/*.opt.yaml
-	rm -rf Debug/shared/cutef8/*.o
-	rm -rf Debug/shared/cutef8/*.opt.yaml
-	rm -rf Debug/shared/libunibreak/src/*.o
-	rm -rf Debug/shared/libunibreak/src/*.opt.yaml
-	rm -rf Debug/shared/qimagescale/*.o
-	rm -rf Debug/shared/qimagescale/*.opt.yaml
-	rm -rf Debug/shared/utf8
-	rm -rf Debug/static/*.o
-	rm -rf Debug/static/*.opt.yaml
-	rm -rf Debug/static/cutef8/*.o
-	rm -rf Debug/static/cutef8/*.opt.yaml
-	rm -rf Debug/static/libunibreak/src/*.o
-	rm -rf Debug/static/libunibreak/src/*.opt.yaml
-	rm -rf Debug/static/qimagescale/*.o
-	rm -rf Debug/static/qimagescale/*.opt.yaml
-	rm -rf Debug/static/utf8
-	rm -rf Debug/*.o
-	rm -rf Debug/*.opt.yaml
-	rm -rf Debug/fbink
-	rm -rf Debug/button_scan
-	rm -rf Debug/rota
-	rm -rf Debug/fbdepth
-	rm -rf Debug/alt_buffer
-	rm -rf Debug/doom
-	rm -rf Debug/dump
-	rm -rf Debug/Kobo-DevCap-Test.tar.gz
-	rm -rf Debug/kx122_i2c
-	rm -rf Debug/ion_heaps
-	rm -rf Debug/finger_trace
+	rm -rf $(OUT_DIR)/*.o
+	rm -rf $(OUT_DIR)/*.opt.yaml
+	rm -rf $(OUT_DIR)/shared/fbink
+	rm -rf $(OUT_DIR)/static/fbink
+	rm -rf $(OUT_DIR)/fbink
+	rm -rf $(OUT_DIR)/shared/button_scan
+	rm -rf $(OUT_DIR)/static/button_scan
+	rm -rf $(OUT_DIR)/button_scan
+	rm -rf $(OUT_DIR)/rota
+	rm -rf $(OUT_DIR)/fbdepth
+	rm -rf $(OUT_DIR)/input_scan
+	rm -rf $(OUT_DIR)/alt_buffer
+	rm -rf $(OUT_DIR)/doom
+	rm -rf $(OUT_DIR)/dump
+	rm -rf $(OUT_DIR)/Kobo-DevCap-Test.tar.gz
+	rm -rf $(OUT_DIR)/kx122_i2c
+	rm -rf $(OUT_DIR)/ion_heaps
+	rm -rf $(OUT_DIR)/finger_trace
+	rm -rf $(OUT_DIR)/rota_map
+	rm -rf $(OUT_DIR)/FBInk-*.tar.*z
 
 distclean: clean libunibreakclean libi2cclean libevdevclean
 	rm -rf libunibreak-staged
@@ -925,6 +1052,23 @@ dist: distclean
 	-P --transform="s,$(CURDIR),FBInk-$(FBINK_VERSION),xS" --show-transformed-names \
 	-cvJf Release/FBInk-$(FBINK_VERSION).tar.xz $(CURDIR)
 
+# No deps, so just try to install all the things
+install:
+	install -d -m 755 $(INCDIR)
+	install -m 644 '$(CURDIR)/fbink.h' $(INCDIR)
+	install -d -m 755 $(DOCDIR)
+	install -m 644 CLI.md $(DOCDIR)
+	install -d -m 755 $(LIBDIR)
+	-install '$(OUT_DIR)/$(FBINK_SHARED_NAME_FILE)' $(LIBDIR)
+	-ln -sf $(FBINK_SHARED_NAME_FILE) '$(LIBDIR)/$(FBINK_SHARED_NAME_VER)'
+	-ln -sf $(FBINK_SHARED_NAME_VER) '$(LIBDIR)/$(FBINK_SHARED_NAME)'
+	-install '$(OUT_DIR)/$(FBINK_STATIC_NAME)' $(LIBDIR)
+	install -d -m 755 $(BINDIR)
+	-install '$(OUT_DIR)/fbink' $(BINDIR)
+	-install '$(OUT_DIR)/fbdepth' $(BINDIR)
+
+format:
+	clang-format -style=file -i *.c *.h cutef8/*.c cutef8/*.h utils/*.c qimagescale/*.c qimagescale/*.h tools/*.c eink/*-kobo.h eink/*-kindle.h eink/einkfb.h
 
 
-.PHONY: default outdir all staticlib sharedlib static tiny tinier shared striplib striparchive stripbin strip debug static pic shared release kindle legacy cervantes linux armcheck kobo remarkable pocketbook libunibreakclean libi2cclean libevdevclean utils alt sunxi ftrace fbdepth dump devcap clean distclean dist
+.PHONY: default outdir all staticlib sharedlib staticinputlib sharedinputlib static small tiny tinyish tinier shared striplib stripinputlib striparchive stripbin strip debug static pic shared release inputlib kindle legacy cervantes linux armcheck kobo remarkable pocketbook libunibreakclean libi2cclean libevdevclean utils rota_map alt sunxi ftrace fbdepth input_scan dump devcap ci clean cleansharedlib cleanstaticlib cleanlib distclean dist install format

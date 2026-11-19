@@ -12,10 +12,6 @@
 .\"  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 .\"  GNU General Public License for more details.
 .\"
-.\"  You should have received a copy of the GNU General Public License along
-.\"  with this program; if not, write to the Free Software Foundation, Inc.,
-.\"  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-.\"
 .TH eeprog "8" "Jul 2013" "i2c-tools" "System Administration"
 .SH NAME
 eeprog \- reads and writes 24Cxx EEPROMs connected to I2C serial bus
@@ -95,6 +91,6 @@ Write the current timestamp at address 0x200 of the EEPROM on bus 0 at address 0
 .P
  	date |
 .B eeprog
-/dev/i2c-0 0x33 -w 0x200
+-f /dev/i2c-0 0x33 -w 0x200
 .SH AUTHOR
 Stefano Barbato

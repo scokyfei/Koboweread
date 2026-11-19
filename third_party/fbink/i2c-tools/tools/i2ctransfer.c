@@ -38,11 +38,19 @@ enum parse_state {
 #define PRINT_READ_BUF	(1 << 1)
 #define PRINT_WRITE_BUF	(1 << 2)
 #define PRINT_HEADER	(1 << 3)
+#define PRINT_BINARY	(1 << 4)
 
 static void help(void)
 {
 	fprintf(stderr,
-		"Usage: i2ctransfer [-f] [-y] [-v] [-V] [-a] I2CBUS DESC [DATA] [DESC [DATA]]...\n"
+		"Usage: i2ctransfer [OPTIONS] I2CBUS DESC [DATA] [DESC [DATA]]...\n"
+		"  OPTIONS: -a allow even reserved addresses\n"
+		"           -b print read data as binary, disables -v\n"
+		"           -f force access even if address is marked used\n"
+		"           -h this help text\n"
+		"           -v verbose mode\n"
+		"           -V version info\n"
+		"           -y yes to all confirmations\n"
 		"  I2CBUS is an integer or an I2C bus name\n"
 		"  DESC describes the transfer in the form: {r|w}LENGTH[@address]\n"
 		"    1) read/write-flag 2) LENGTH (range 0-65535, or '?')\n"
@@ -77,10 +85,10 @@ static int check_funcs(int file)
 	return 0;
 }
 
-static void print_msgs(struct i2c_msg *msgs, __u32 nmsgs, unsigned flags)
+static void print_msgs(struct i2c_msg *msgs, __u32 nmsgs, unsigned int flags)
 {
 	FILE *output = flags & PRINT_STDERR ? stderr : stdout;
-	unsigned i;
+	unsigned int i;
 	__u16 j;
 
 	for (i = 0; i < nmsgs; i++) {
@@ -100,12 +108,16 @@ static void print_msgs(struct i2c_msg *msgs, __u32 nmsgs, unsigned flags)
 		}
 
 		if (len && print_buf) {
-			if (flags & PRINT_HEADER)
-				fprintf(output, ", buf ");
-			for (j = 0; j < len - 1; j++)
-				fprintf(output, "0x%02x ", msgs[i].buf[j]);
-			/* Print final byte with newline */
-			fprintf(output, "0x%02x\n", msgs[i].buf[j]);
+			if (flags & PRINT_BINARY) {
+				fwrite(msgs[i].buf, 1, len, output);
+			} else {
+				if (flags & PRINT_HEADER)
+					fprintf(output, ", buf ");
+				for (j = 0; j < len - 1; j++)
+					fprintf(output, "0x%02x ", msgs[i].buf[j]);
+				/* Print final byte with newline */
+				fprintf(output, "0x%02x\n", msgs[i].buf[j]);
+			}
 		} else if (flags & PRINT_HEADER) {
 			fprintf(output, "\n");
 		}
@@ -131,25 +143,25 @@ static int confirm(const char *filename, struct i2c_msg *msgs, __u32 nmsgs)
 int main(int argc, char *argv[])
 {
 	char filename[20];
-	int i2cbus, address = -1, file, opt, arg_idx, nmsgs = 0, nmsgs_sent, i;
-	int force = 0, yes = 0, version = 0, verbose = 0, all_addrs = 0;
+	int i2cbus, address = -1, file, opt, nmsgs = 0, nmsgs_sent, i;
+	int force = 0, yes = 0, version = 0, verbose = 0, all_addrs = 0, binary = 0;
 	struct i2c_msg msgs[I2C_RDRW_IOCTL_MAX_MSGS];
 	enum parse_state state = PARSE_GET_DESC;
-	unsigned buf_idx = 0;
+	unsigned int buf_idx = 0;
 
-	for (i = 0; i < I2C_RDRW_IOCTL_MAX_MSGS; i++)
-		msgs[i].buf = NULL;
+	memset(msgs, 0, sizeof(msgs));
 
 	/* handle (optional) flags first */
-	while ((opt = getopt(argc, argv, "Vafhvy")) != -1) {
+	while ((opt = getopt(argc, argv, "abfhvVy")) != -1) {
 		switch (opt) {
-		case 'V': version = 1; break;
-		case 'v': verbose = 1; break;
-		case 'f': force = 1; break;
-		case 'y': yes = 1; break;
 		case 'a': all_addrs = 1; break;
-		case 'h':
+		case 'b': binary = 1; break;
+		case 'f': force = 1; break;
+		case 'v': verbose = 1; break;
+		case 'V': version = 1; break;
+		case 'y': yes = 1; break;
 		case '?':
+		case 'h':
 			help();
 			exit(opt == '?');
 		}
@@ -160,13 +172,12 @@ int main(int argc, char *argv[])
 		exit(0);
 	}
 
-	arg_idx = optind;
-	if (arg_idx == argc) {
+	if (optind == argc) {
 		help();
 		exit(1);
 	}
 
-	i2cbus = lookup_i2c_bus(argv[arg_idx++]);
+	i2cbus = lookup_i2c_bus(argv[optind++]);
 	if (i2cbus < 0)
 		exit(1);
 
@@ -174,14 +185,14 @@ int main(int argc, char *argv[])
 	if (file < 0 || check_funcs(file))
 		exit(1);
 
-	while (arg_idx < argc) {
-		char *arg_ptr = argv[arg_idx];
+	while (optind < argc) {
+		char *arg_ptr = argv[optind];
 		unsigned long len, raw_data;
 		__u16 flags;
 		__u8 data, *buf;
 		char *end;
 
-		if (nmsgs > I2C_RDRW_IOCTL_MAX_MSGS) {
+		if (nmsgs == I2C_RDRW_IOCTL_MAX_MSGS) {
 			fprintf(stderr, "Error: Too many messages (max: %d)\n",
 				I2C_RDRW_IOCTL_MAX_MSGS);
 			goto err_out;
@@ -310,7 +321,7 @@ int main(int argc, char *argv[])
 			goto err_out;
 		}
 
-		arg_idx++;
+		optind++;
 	}
 
 	if (state != PARSE_GET_DESC || nmsgs == 0) {
@@ -320,7 +331,9 @@ int main(int argc, char *argv[])
 
 	if (yes || confirm(filename, msgs, nmsgs)) {
 		struct i2c_rdwr_ioctl_data rdwr;
+		unsigned int print_flags = PRINT_READ_BUF;
 
+		memset(&rdwr, 0, sizeof(rdwr));
 		rdwr.msgs = msgs;
 		rdwr.nmsgs = nmsgs;
 		nmsgs_sent = ioctl(file, I2C_RDWR, &rdwr);
@@ -331,7 +344,12 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "Warning: only %d/%d messages were sent\n", nmsgs_sent, nmsgs);
 		}
 
-		print_msgs(msgs, nmsgs_sent, PRINT_READ_BUF | (verbose ? PRINT_HEADER | PRINT_WRITE_BUF : 0));
+		if (binary)
+			print_flags |= PRINT_BINARY;
+		else if (verbose)
+			print_flags |= PRINT_HEADER | PRINT_WRITE_BUF;
+
+		print_msgs(msgs, nmsgs_sent, print_flags);
 	}
 
 	close(file);
@@ -342,11 +360,17 @@ int main(int argc, char *argv[])
 	exit(0);
 
  err_out_with_arg:
-	fprintf(stderr, "Error: faulty argument is '%s'\n", argv[arg_idx]);
+	fprintf(stderr, "Error: faulty argument is '%s'\n", argv[optind]);
  err_out:
 	close(file);
 
-	for (i = 0; i <= nmsgs; i++)
+	/*
+	 * If we were parsing data, the buffer for the last message was
+	 * already allocated and nmsgs still points to it.
+	 */
+	if (state == PARSE_GET_DATA)
+		free(msgs[nmsgs].buf);
+	for (i = 0; i < nmsgs; i++)
 		free(msgs[i].buf);
 
 	exit(1);

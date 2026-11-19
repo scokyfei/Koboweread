@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -286,20 +286,20 @@ int
 	int                        opt;
 	int                        opt_index;
 	static const struct option opts[] = {
-		{               "depth", required_argument, NULL, 'd'},
-		{                "help",       no_argument, NULL, 'h'},
-		{             "verbose",       no_argument, NULL, 'v'},
-		{               "quiet",       no_argument, NULL, 'q'},
-		{                 "get",       no_argument, NULL, 'g'},
-		{             "getcode",       no_argument, NULL, 'G'},
-		{                "rota", required_argument, NULL, 'r'},
-		{       "canonicalrota", required_argument, NULL, 'R'},
-		{             "getrota",       no_argument, NULL, 'o'},
-		{         "getrotacode",       no_argument, NULL, 'O'},
-		{    "getcanonicalrota",       no_argument, NULL, 'c'},
-		{"getcanonicalrotacode",       no_argument, NULL, 'C'},
-		{           "nightmode", required_argument, NULL, 'H'},
-		{		  NULL,                 0, NULL,   0}
+		{                "depth", required_argument, NULL, 'd' },
+		{                 "help",       no_argument, NULL, 'h' },
+		{              "verbose",       no_argument, NULL, 'v' },
+		{                "quiet",       no_argument, NULL, 'q' },
+		{		  "get",       no_argument, NULL, 'g' },
+		{              "getcode",       no_argument, NULL, 'G' },
+		{                 "rota", required_argument, NULL, 'r' },
+		{        "canonicalrota", required_argument, NULL, 'R' },
+		{              "getrota",       no_argument, NULL, 'o' },
+		{          "getrotacode",       no_argument, NULL, 'O' },
+		{     "getcanonicalrota",       no_argument, NULL, 'c' },
+		{ "getcanonicalrotacode",       no_argument, NULL, 'C' },
+		{            "nightmode", required_argument, NULL, 'H' },
+		{		   NULL,                 0, NULL,   0 }
 	};
 
 	uint8_t  req_bpp          = KEEP_CURRENT_BITDEPTH;
@@ -315,6 +315,10 @@ int
 #if defined(FBINK_FOR_KOBO)
 	bool canonical_rota = false;
 #endif
+
+	// NOTE: Enforce line-buffering, to make I/O redirections less confusing (e.g., in DevCap logs),
+	//       as we often mix stdout with stderr, and unlike stdout, stderr is always unbuffered (c.f., setvbuf(3)).
+	setlinebuf(stdout);
 
 	while ((opt = getopt_long(argc, argv, "d:hvqgGr:R:oOcCH:", opts, &opt_index)) != -1) {
 		switch (opt) {
@@ -453,9 +457,9 @@ int
 	FBInkConfig fbink_cfg = { 0 };
 	fbink_cfg.is_verbose  = isVerbose;
 	fbink_cfg.is_quiet    = isQuiet;
-	int fbfd              = -1;
+	int fbfd              = fbink_open();
 	// Open framebuffer and keep it around, then setup globals.
-	if ((fbfd = fbink_open()) == ERRCODE(EXIT_FAILURE)) {
+	if (fbfd == ERRCODE(EXIT_FAILURE)) {
 		WARN("Failed to open the framebuffer, aborting");
 		rv = ERRCODE(EXIT_FAILURE);
 		goto cleanup;
@@ -523,6 +527,8 @@ int
 		// NOTE: For *most* devices, Nickel's Portrait orientation should *always* match BootRota + 1
 		//       Thankfully, the Libra appears to be ushering in a new era filled with puppies and rainbows,
 		//       and, hopefully, less insane rotation quirks ;).
+		// NOTE: Consider this computation deprecated, prefer using fbink_rota_native_to_canonical(0)
+		//       (i.e., what happens with -R UR instead of this, -r -1).
 		if (fbink_state.ntx_rota_quirk != NTX_ROTA_SANE) {
 			req_rota = (fbink_state.ntx_boot_rota + 1) & 3;
 		} else {
@@ -553,8 +559,22 @@ int
 	if ((req_bpp == KEEP_CURRENT_BITDEPTH && fbink_state.bpp == 8U) || req_bpp == 8U) {
 		if (want_nm == true) {
 			req_gray = 2U;    // GRAYSCALE_8BIT_INVERTED
+#ifdef FBINK_FOR_KINDLE
+			if (fbink_state.is_mtk && fbink_state.has_color_panel) {
+				if (var_info.grayscale == 0U /* GRAYSCALE_COLOR */) {
+					req_gray = 3U;    // GRAYSCALE_COLOR_NIGHTMODE
+				}
+			}
+#endif
 		} else if (want_nm == false) {
 			req_gray = 1U;    // GRAYSCALE_8BIT
+#ifdef FBINK_FOR_KINDLE
+			if (fbink_state.is_mtk && fbink_state.has_color_panel) {
+				if (var_info.grayscale == 3U /* GRAYSCALE_COLOR_NIGHTMODE */) {
+					req_gray = 0U;    // GRAYSCALE_COLOR
+				}
+			}
+#endif
 		} else if (want_nm == TOGGLE_GRAYSCALE) {
 			req_gray = TOGGLE_GRAYSCALE;
 		}
@@ -573,8 +593,17 @@ int
 	// Then bitdepth...
 	if (req_bpp == KEEP_CURRENT_BITDEPTH || fbink_state.bpp == req_bpp) {
 		// Also check that the grayscale flag is sane
+#ifdef FBINK_FOR_KINDLE
+		uint8_t max_sane_8bpp_grayscale = 2U;    // GRAYSCALE_8BIT_INVERTED
+		if (fbink_state.is_mtk && fbink_state.has_color_panel) {
+			max_sane_8bpp_grayscale = 3U;    // GRAYSCALE_COLOR_NIGHTMODE
+		}
+#else
+		const uint8_t max_sane_8bpp_grayscale = 2U;    // GRAYSCALE_8BIT_INVERTED
+#endif
 		if (req_gray == KEEP_CURRENT_GRAYSCALE &&
-		    ((fbink_state.bpp == 8U && (var_info.grayscale == 0U || var_info.grayscale > 2U)) ||
+		    ((fbink_state.bpp == 8U &&
+		      (var_info.grayscale == 0U || var_info.grayscale > max_sane_8bpp_grayscale)) ||
 		     (fbink_state.bpp > 8U && var_info.grayscale != 0U))) {
 			LOG("Current bitdepth is already %ubpp, but the grayscale flag is bogus!", fbink_state.bpp);
 			// Continue, we'll need to flip the grayscale flag properly

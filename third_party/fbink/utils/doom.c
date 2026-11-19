@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -33,6 +33,7 @@
 #endif
 
 #include <getopt.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -198,43 +199,43 @@ static bool
 //     & https://github.com/fabiensanglard/DoomFirePSX/blob/master/flames.html
 //     & https://github.com/cylgom/ly/blob/master/src/draw.c
 static const uint8_t fire_colors[][3] = {
-	{0x07, 0x07, 0x07},
-        {0x1F, 0x07, 0x07},
-        {0x2F, 0x0F, 0x07},
-        {0x47, 0x0F, 0x07},
-        {0x57, 0x17, 0x07},
-	{0x67, 0x1F, 0x07},
-        {0x77, 0x1F, 0x07},
-        {0x8F, 0x27, 0x07},
-        {0x9F, 0x2F, 0x07},
-        {0xAF, 0x3F, 0x07},
-	{0xBF, 0x47, 0x07},
-        {0xC7, 0x47, 0x07},
-        {0xDF, 0x4F, 0x07},
-        {0xDF, 0x57, 0x07},
-        {0xDF, 0x57, 0x07},
-	{0xD7, 0x5F, 0x07},
-        {0xD7, 0x5F, 0x07},
-        {0xD7, 0x67, 0x0F},
-        {0xCF, 0x6F, 0x0F},
-        {0xCF, 0x77, 0x0F},
-	{0xCF, 0x7F, 0x0F},
-        {0xCF, 0x87, 0x17},
-        {0xC7, 0x87, 0x17},
-        {0xC7, 0x8F, 0x17},
-        {0xC7, 0x97, 0x1F},
-	{0xBF, 0x9F, 0x1F},
-        {0xBF, 0x9F, 0x1F},
-        {0xBF, 0xA7, 0x27},
-        {0xBF, 0xA7, 0x27},
-        {0xBF, 0xAF, 0x2F},
-	{0xB7, 0xAF, 0x2F},
-        {0xB7, 0xB7, 0x2F},
-        {0xB7, 0xB7, 0x37},
-        {0xCF, 0xCF, 0x6F},
-        {0xDF, 0xDF, 0x9F},
-	{0xEF, 0xEF, 0xC7},
-        {0xFF, 0xFF, 0xFF},
+	{ 0x07, 0x07, 0x07 },
+        { 0x1F, 0x07, 0x07 },
+        { 0x2F, 0x0F, 0x07 },
+        { 0x47, 0x0F, 0x07 },
+        { 0x57, 0x17, 0x07 },
+	{ 0x67, 0x1F, 0x07 },
+        { 0x77, 0x1F, 0x07 },
+        { 0x8F, 0x27, 0x07 },
+        { 0x9F, 0x2F, 0x07 },
+        { 0xAF, 0x3F, 0x07 },
+	{ 0xBF, 0x47, 0x07 },
+        { 0xC7, 0x47, 0x07 },
+        { 0xDF, 0x4F, 0x07 },
+        { 0xDF, 0x57, 0x07 },
+        { 0xDF, 0x57, 0x07 },
+	{ 0xD7, 0x5F, 0x07 },
+        { 0xD7, 0x5F, 0x07 },
+        { 0xD7, 0x67, 0x0F },
+        { 0xCF, 0x6F, 0x0F },
+        { 0xCF, 0x77, 0x0F },
+	{ 0xCF, 0x7F, 0x0F },
+        { 0xCF, 0x87, 0x17 },
+        { 0xC7, 0x87, 0x17 },
+        { 0xC7, 0x8F, 0x17 },
+        { 0xC7, 0x97, 0x1F },
+	{ 0xBF, 0x9F, 0x1F },
+        { 0xBF, 0x9F, 0x1F },
+        { 0xBF, 0xA7, 0x27 },
+        { 0xBF, 0xA7, 0x27 },
+        { 0xBF, 0xAF, 0x2F },
+	{ 0xB7, 0xAF, 0x2F },
+        { 0xB7, 0xB7, 0x2F },
+        { 0xB7, 0xB7, 0x37 },
+        { 0xCF, 0xCF, 0x6F },
+        { 0xDF, 0xDF, 0x9F },
+	{ 0xEF, 0xEF, 0xC7 },
+        { 0xFF, 0xFF, 0xFF },
 };
 
 #ifndef FBINK_FOR_LINUX
@@ -511,22 +512,19 @@ static void
     spread_fire_32(size_t offset)
 {
 	FBInkPixel px;
-	px.bgra.p = *((uint32_t*) (fbPtr + offset));
+	px.p = *((uint32_t*) (fbPtr + offset));
 	if (px.bgra.color.r == fire_colors[0U][0U] && px.bgra.color.g == fire_colors[0U][1U] &&
 	    px.bgra.color.b == fire_colors[0U][2U]) {
-		*((uint32_t*) (fbPtr + offset - fInfo.line_length)) = px.bgra.p;
+		*((uint32_t*) (fbPtr + offset - fInfo.line_length)) = px.p;
 	} else {
 		const size_t       random  = (rand() * 3) & 3;
 		const size_t       dst     = offset - random + 1U;
 		const unsigned int pal_idx = find_palette_id_32(px.bgra.color.r, px.bgra.color.g, px.bgra.color.b);
 		const size_t       idx     = pal_idx - (random & 1U);
-		// cppcheck-suppress unreadVariable ; false-positive (union)
 		px.bgra.color.r            = fire_colors[idx][0U];
-		// cppcheck-suppress unreadVariable ; false-positive (union)
 		px.bgra.color.g            = fire_colors[idx][1U];
-		// cppcheck-suppress unreadVariable ; false-positive (union)
 		px.bgra.color.b            = fire_colors[idx][2U];
-		*((uint32_t*) (fbPtr + dst - fInfo.line_length)) = px.bgra.p;
+		*((uint32_t*) (fbPtr + dst - fInfo.line_length)) = px.p;
 	}
 }
 
@@ -604,19 +602,19 @@ int
 	int                        opt;
 	int                        opt_index;
 	static const struct option opts[] = {
-		{   "help",       no_argument, NULL, 'h'},
-		{"verbose",       no_argument, NULL, 'v'},
-		{  "quiet",       no_argument, NULL, 'q'},
-		{     "fs",       no_argument, NULL, 'f'},
-		{  "flash",       no_argument, NULL, 'F'},
-		{  "scale", required_argument, NULL, 'S'},
-		{   "time",       no_argument, NULL, 't'},
-		{    "wfm", required_argument, NULL, 'W'},
-		{ "dither", required_argument, NULL, 'D'},
-		{  "limit", required_argument, NULL, 'l'},
-		{    "cap", required_argument, NULL, 'c'},
-		{   "rota", required_argument, NULL, 'r'},
-		{     NULL,                 0, NULL,   0}
+		{    "help",       no_argument, NULL, 'h' },
+		{ "verbose",       no_argument, NULL, 'v' },
+		{   "quiet",       no_argument, NULL, 'q' },
+		{      "fs",       no_argument, NULL, 'f' },
+		{   "flash",       no_argument, NULL, 'F' },
+		{   "scale", required_argument, NULL, 'S' },
+		{    "time",       no_argument, NULL, 't' },
+		{     "wfm", required_argument, NULL, 'W' },
+		{  "dither", required_argument, NULL, 'D' },
+		{   "limit", required_argument, NULL, 'l' },
+		{     "cap", required_argument, NULL, 'c' },
+		{    "rota", required_argument, NULL, 'r' },
+		{      NULL,                 0, NULL,   0 }
 	};
 
 #ifndef FBINK_FOR_LINUX
@@ -790,7 +788,6 @@ int
 #ifndef FBINK_FOR_LINUX
 #	ifndef FBINK_FOR_KINDLE
 	// If the automagic Portrait rotation was requested, compute it
-	// cppcheck-suppress knownConditionTrueFalse ; true, kept to mirror fbdepth
 	if (req_rota == -1) {
 		// NOTE: For *most* devices, Nickel's Portrait orientation should *always* match BootRota + 1
 		//       Thankfully, the Libra appears to be ushering in a new era filled with puppies and rainbows,

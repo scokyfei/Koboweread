@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -27,53 +27,60 @@
 
 #include "fbink_cmd.h"
 
+static const char*
+    has_feature(const uint32_t mask, uint32_t flag)
+{
+	if (mask & flag) {
+		return "Yes";
+	} else {
+		return "No";
+	}
+}
 // Help message
 static void
     show_helpmsg(void)
 {
-	printf(
-	    "\n"
-#ifdef FBINK_MINIMAL
-	    "FBInk %s [Modular build:"
-	    " Fonts="
-#	ifdef FBINK_WITH_FONTS
-	    "Yes"
-#	else
-	    "No"
-#	endif    // FBINK_WITH_FONTS
-	    " Unifont="
-#	ifdef FBINK_WITH_UNIFONT
-	    "Yes"
-#	else
-	    "No"
-#	endif    // FBINK_WITH_UNIFONT
-	    " Image="
-#	ifdef FBINK_WITH_IMAGE
-	    "Yes"
-#	else
-	    "No"
-#	endif    // FBINK_WITH_IMAGE
-	    " OpenType="
-#	ifdef FBINK_WITH_OPENTYPE
-	    "Yes"
-#	else
-	    "No"
-#	endif    // FBINK_WITH_OPENTYPE
-#	if defined(FBINK_FOR_KOBO)
-	    " ButtonScan="
-#		ifdef FBINK_WITH_BUTTON_SCAN
-	    "Yes"
-#		else
-	    "No"
-#		endif    // FBINK_WITH_BUTTON_SCAN
-#	endif            // FBINK_FOR_KOBO
-	    "]"
-#else
-	    "FBInk %s"
-#endif    // FBINK_MINIMAL
+	printf("\nFBInk %s", fbink_version());
+	// Display the target platform
+	const FBINK_TARGET_T platform = fbink_target();
+	switch (platform) {
+		case FBINK_TARGET_LINUX:
+			printf(" for Linux");
+			break;
+		case FBINK_TARGET_KOBO:
+			printf(" for Kobo");
+			break;
+		case FBINK_TARGET_KINDLE:
+			printf(" for Kindle");
+			break;
+		case FBINK_TARGET_KINDLE_LEGACY:
+			printf(" for Legacy Kindle");
+			break;
+		case FBINK_TARGET_CERVANTES:
+			printf(" for Cervantes");
+			break;
+		case FBINK_TARGET_REMARKABLE:
+			printf(" for reMarkable");
+			break;
+		case FBINK_TARGET_POCKETBOOK:
+			printf(" for PocketBook");
+			break;
+	}
+	// Recap the build features
+	const uint32_t features = fbink_features();
+	printf(" [Draw=%s, Bitmap=%s, Fonts=%s, Unifont=%s, OpenType=%s, Image=%s, Input=%s, ButtonScan=%s]",
+	       has_feature(features, FBINK_FEATURE_DRAW),
+	       has_feature(features, FBINK_FEATURE_BITMAP),
+	       has_feature(features, FBINK_FEATURE_FONTS),
+	       has_feature(features, FBINK_FEATURE_UNIFONT),
+	       has_feature(features, FBINK_FEATURE_OPENTYPE),
+	       has_feature(features, FBINK_FEATURE_IMAGE),
+	       has_feature(features, FBINK_FEATURE_INPUT),
+	       has_feature(features, FBINK_FEATURE_BUTTON_SCAN));
 #ifdef DEBUG
-	    " [DEBUG]"
+	printf(" [DEBUG]");
 #endif
+	printf(
 	    "\n"
 	    "\n"
 	    "Usage: fbink [OPTIONS] [STRING ...]\n"
@@ -122,12 +129,12 @@ static void
 	    "\t-W, --waveform MODE\tRequest a specific waveform update mode from the eInk controller, if supported (mainly useful for images).\n"
 	    "\t\t\t\tAvailable waveform modes: A2, DU, GL16, GC16 & AUTO\n"
 #	if defined(FBINK_FOR_KINDLE)
-	    "\t\t\t\tAs well as REAGL, REAGLD, GC16_FAST, GL16_FAST, DU4, GL4, GL16_INV, GCK16, GLKW16 & DUNM on some Kindles, depending on the model & FW version.\n"
+	    "\t\t\t\tAs well as REAGL, REAGLD, GC16_FAST, GL16_FAST, DU4, GL4, GL16_INV, GCK16, GLKW16, DUNM, GCC16, GLRC16, GCCK16 & GLRCK16 on some Kindles, depending on the model & FW version.\n"
 	    "\t\t\t\tNote that specifying a waveform mode is ignored on legacy einkfb devices, because the hardware doesn't expose such capabilities.\n"
 #	elif defined(FBINK_FOR_POCKETBOOK)
 	    "\t\t\t\tAs well as GC4, A2IN, A2OUT, DU4, REAGL, REAGLD, GC16HQ & GS16.\n"
 #	elif defined(FBINK_FOR_KOBO)
-	    "\t\t\t\tAs well as GC4, REAGL & REAGLD. And GU16, GCK16, GLK16 & GCC16 on Mk. 8. And DU4, GCK16 & GLKW16 on Mk. 9.\n"
+	    "\t\t\t\tAs well as GC4, REAGL & REAGLD. And GU16, GCK16, GLK16 & GCC16 on Mk. 8. And DU4, GCK16 & GLKW16 on Mk. 9 & 10. And GCK16, GLKW16, GCC16 & GLRC16 on Mk. 11, 12 & 13\n"
 #	elif defined(FBINK_FOR_CERVANTES)
 	    "\t\t\t\tAs well as GC4, REAGL & REAGLD.\n"
 #	endif
@@ -193,6 +200,8 @@ static void
 	    "\t-B, --background NAME\tColor of the background the text will be printed on (Default: WHITE).\n"
 	    "\t\t\t\tAvailable colors: BLACK, GRAY1, GRAY2, GRAY3, GRAY4, GRAY5, GRAY6, GRAY7,\n"
 	    "\t\t\t\t\t\tGRAY8, GRAY9, GRAYA, GRAYB, GRAYC, GRAYD, GRAYE, WHITE\n"
+	    "\t\t\t\tYou can also pass an exact hexadecimal color code in the #RRGGBB or #RRGGBBAA format, e.g.,\n"
+	    "\t\t\t\t\t\t#FF0000 for red, #00FF00 for green, #0000FF for blue.\n"
 	    "\t-o, --overlay\t\tDon't draw background pixels, and compute foreground pixel color based on the inverse of the underlying framebufer pixel.\n"
 	    "\t\t\t\tObviously ignores -h, --invert & -C, --color *as far as glyphs are concerned*.\n"
 	    "\t\t\t\t-B, --background is still honored if you combine this with -c, --clear\n"
@@ -341,6 +350,9 @@ static void
 	    "\n"
 	    "Options affecting the image's appearance:\n"
 	    "\t-a, --flatten\tIgnore the alpha channel.\n"
+	    "\t-j, --saturation\tBoost color saturation (in percent). Aimed at Kaleido panels. 32bpp only.\n"
+	    "\t-J, --cfa MODE\tRequest a specific CFA post-process mode from the eInk controller, if supported (Kaleido panels, 32bpp, with GCC16 or GLRC16).\n"
+	    "\t\t\t\tAvailable CFA modes: S4, S7, S9, G0, G1, G2, NTX, SF & SKIP\n"
 	    "\n"
 	    "NOTES:\n"
 	    "\tSupported image formats: JPEG, PNG, TGA, BMP, GIF & PNM\n"
@@ -386,8 +398,7 @@ static void
 	    "\tAlso, the daemon will NOT abort on FBInk errors, and it redirects stdout & stderr to /dev/null, so errors & bogus input will be silently ignored!\n"
 	    "\tIt can abort on early setup errors, though, before *or* after having redirected stderr...\n"
 	    "\tIt does enforce logging to the syslog, though, but, again, early commandline parsing errors may still be sent to stderr...\n"
-	    "\n",
-	    fbink_version());
+	    "\n");
 
 	return;
 }
@@ -454,8 +465,8 @@ static int
 	fflush(stdout);
 
 	// Redirect stdin, stdout & stderr to /dev/null
-	int fd = -1;
-	if ((fd = open("/dev/null", O_RDWR)) != -1) {
+	int fd = open("/dev/null", O_RDWR);
+	if (fd != -1) {
 		dup2(fd, fileno(stdin));
 		dup2(fd, fileno(stdout));
 		dup2(fd, fileno(stderr));
@@ -479,7 +490,7 @@ static int
 {
 	int rv = EXIT_SUCCESS;
 
-	const struct timespec zzz = { 0L, 750000000L };
+	const struct timespec zzz = { 0L, 750 * 1e+6 };
 	for (;;) {
 		for (uint8_t i = 0; i < 16; i++) {
 			rv = fbink_print_activity_bar(fbfd, i, fbink_cfg);
@@ -614,42 +625,49 @@ static void
 static int
     strtoul_u(int opt, const char* subopt, const char* str, uint32_t* result)
 {
-	strtoul_chk(opt, subopt, str, result);
+	strtoul_chk(opt, subopt, str, result, true);
 }
 
 // Input validation via strtoul, for an uint16_t
 static int
     strtoul_hu(int opt, const char* subopt, const char* str, uint16_t* result)
 {
-	strtoul_chk(opt, subopt, str, result);
+	strtoul_chk(opt, subopt, str, result, true);
 }
 
 // Input validation via strtoul, for an uint8_t
 static int
     strtoul_hhu(int opt, const char* subopt, const char* str, uint8_t* result)
 {
-	strtoul_chk(opt, subopt, str, result);
+	strtoul_chk(opt, subopt, str, result, true);
+}
+
+// Input validation via strtoul, for an uint8_t (accept trailing garbage, e.g., LFs)
+static int
+    strtoul_hhu_lax(int opt, const char* subopt, const char* str, uint8_t* result)
+{
+	strtoul_chk(opt, subopt, str, result, false);
 }
 
 // Input validation via strtol, for a short int
 static int
     strtol_hi(int opt, const char* subopt, const char* str, short int* result)
 {
-	strtol_chk(opt, subopt, str, result);
+	strtol_chk(opt, subopt, str, result, true);
 }
 
 // Input validation via strtol, for an int8_t
 static int
     strtol_hhi(int opt, const char* subopt, const char* str, int8_t* result)
 {
-	strtol_chk(opt, subopt, str, result);
+	strtol_chk(opt, subopt, str, result, true);
 }
 
 // In the same vein, but with strtof, for a *positive* float
 static int
     strtof_pos(int opt, const char* subopt, const char* str, float* result)
 {
-	strtof_chk(opt, subopt, str, result);
+	strtof_chk(opt, subopt, str, result, true);
 }
 
 // Application entry point
@@ -661,52 +679,54 @@ int
 	//       so we need to do the matching ourselves when we're passed *short* options, hence the sentinel value...
 	int                        opt_index = -1;
 	static const struct option opts[]    = {
-                {          "row", required_argument, NULL, 'y'},
-                {          "col", required_argument, NULL, 'x'},
-                {      "voffset", required_argument, NULL, 'Y'},
-                {      "hoffset", required_argument, NULL, 'X'},
-                {       "invert",       no_argument, NULL, 'h'},
-                {        "flash",       no_argument, NULL, 'f'},
-                {        "clear",       no_argument, NULL, 'c'},
-                {     "centered",       no_argument, NULL, 'm'},
-                {      "halfway",       no_argument, NULL, 'M'},
-                {       "padded",       no_argument, NULL, 'p'},
-                {      "rpadded",       no_argument, NULL, 'r'},
-                {      "refresh", optional_argument, NULL, 's'},
-                {         "size", required_argument, NULL, 'S'},
-                {         "font", required_argument, NULL, 'F'},
-                {      "verbose",       no_argument, NULL, 'v'},
-                {        "quiet",       no_argument, NULL, 'q'},
-                {        "image", required_argument, NULL, 'g'},
-                {          "img", required_argument, NULL, 'i'},
-                {      "flatten",       no_argument, NULL, 'a'},
-                {         "eval",       no_argument, NULL, 'e'},
-                {  "interactive",       no_argument, NULL, 'I'},
-                {        "color", required_argument, NULL, 'C'},
-                {   "background", required_argument, NULL, 'B'},
-                {"linecountcode",       no_argument, NULL, 'L'},
-                {    "linecount",       no_argument, NULL, 'l'},
-                {  "progressbar", required_argument, NULL, 'P'},
-                {  "activitybar", required_argument, NULL, 'A'},
-                {   "noviewport",       no_argument, NULL, 'V'},
-                {      "overlay",       no_argument, NULL, 'o'},
-                {       "bgless",       no_argument, NULL, 'O'},
-                {       "fgless",       no_argument, NULL, 'T'},
-                {     "truetype", required_argument, NULL, 't'},
-                {    "norefresh",       no_argument, NULL, 'b'},
-                {       "dither", optional_argument, NULL, 'D'},
-                {     "waveform", required_argument, NULL, 'W'},
-                {    "nightmode",       no_argument, NULL, 'H'},
-                {  "coordinates",       no_argument, NULL, 'E'},
-                {        "mimic",       no_argument, NULL, 'Z'},
-                {     "koreader",       no_argument, NULL, 'z'},
-                {          "cls", optional_argument, NULL, 'k'},
-                {      "animate", required_argument, NULL, 'K'},
-                {         "wait",       no_argument, NULL, 'w'},
-                {       "daemon", required_argument, NULL, 'd'},
-                {       "syslog",       no_argument, NULL, 'G'},
-                {         "help",       no_argument, NULL, 'Q'},
-                {           NULL,                 0, NULL,   0}
+		{           "row", required_argument, NULL, 'y' },
+		{           "col", required_argument, NULL, 'x' },
+		{       "voffset", required_argument, NULL, 'Y' },
+		{       "hoffset", required_argument, NULL, 'X' },
+		{        "invert",       no_argument, NULL, 'h' },
+		{         "flash",       no_argument, NULL, 'f' },
+		{         "clear",       no_argument, NULL, 'c' },
+		{      "centered",       no_argument, NULL, 'm' },
+		{       "halfway",       no_argument, NULL, 'M' },
+		{        "padded",       no_argument, NULL, 'p' },
+		{       "rpadded",       no_argument, NULL, 'r' },
+		{       "refresh", optional_argument, NULL, 's' },
+		{          "size", required_argument, NULL, 'S' },
+		{          "font", required_argument, NULL, 'F' },
+		{       "verbose",       no_argument, NULL, 'v' },
+		{         "quiet",       no_argument, NULL, 'q' },
+		{         "image", required_argument, NULL, 'g' },
+		{           "img", required_argument, NULL, 'i' },
+		{    "saturation", required_argument, NULL, 'j' },
+		{           "cfa", required_argument, NULL, 'J' },
+		{       "flatten",       no_argument, NULL, 'a' },
+		{          "eval",       no_argument, NULL, 'e' },
+		{   "interactive",       no_argument, NULL, 'I' },
+		{         "color", required_argument, NULL, 'C' },
+		{    "background", required_argument, NULL, 'B' },
+		{ "linecountcode",       no_argument, NULL, 'L' },
+		{     "linecount",       no_argument, NULL, 'l' },
+		{   "progressbar", required_argument, NULL, 'P' },
+		{   "activitybar", required_argument, NULL, 'A' },
+		{    "noviewport",       no_argument, NULL, 'V' },
+		{       "overlay",       no_argument, NULL, 'o' },
+		{        "bgless",       no_argument, NULL, 'O' },
+		{        "fgless",       no_argument, NULL, 'T' },
+		{      "truetype", required_argument, NULL, 't' },
+		{     "norefresh",       no_argument, NULL, 'b' },
+		{        "dither", optional_argument, NULL, 'D' },
+		{      "waveform", required_argument, NULL, 'W' },
+		{     "nightmode",       no_argument, NULL, 'H' },
+		{   "coordinates",       no_argument, NULL, 'E' },
+		{         "mimic",       no_argument, NULL, 'Z' },
+		{      "koreader",       no_argument, NULL, 'z' },
+		{           "cls", optional_argument, NULL, 'k' },
+		{       "animate", required_argument, NULL, 'K' },
+		{          "wait",       no_argument, NULL, 'w' },
+		{        "daemon", required_argument, NULL, 'd' },
+		{        "syslog",       no_argument, NULL, 'G' },
+		{          "help",       no_argument, NULL, 'Q' },
+		{            NULL,                 0, NULL,   0 }
 	};
 
 	FBInkConfig fbink_cfg = { 0 };
@@ -757,10 +777,10 @@ int
 		DIRECTION_OPT = 0,
 		STEPS_OPT,
 	};
-#pragma GCC diagnostic   push
-#pragma GCC diagnostic   ignored "-Wunknown-pragmas"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic   ignored "-Wdiscarded-qualifiers"
+#pragma GCC diagnostic ignored "-Wdiscarded-qualifiers"
 #pragma clang diagnostic ignored "-Wincompatible-pointer-types-discards-qualifiers"
 	char* const refresh_token[] = {
 		[TOP_OPT] = "top", [LEFT_OPT] = "left", [WIDTH_OPT] = "width", [HEIGHT_OPT] = "height", NULL
@@ -778,7 +798,7 @@ int
 					 [STYLE_OPT] = "style",     NULL };
 	// Recycle the refresh enum ;).
 	char* const cls_token[]      = {
-                [TOP_OPT] = "top", [LEFT_OPT] = "left", [WIDTH_OPT] = "width", [HEIGHT_OPT] = "height", NULL
+		[TOP_OPT] = "top", [LEFT_OPT] = "left", [WIDTH_OPT] = "width", [HEIGHT_OPT] = "height", NULL
 	};
 	char* const anim_token[] = { [DIRECTION_OPT] = "direction", [STEPS_OPT] = "steps", NULL };
 #pragma GCC diagnostic pop
@@ -789,8 +809,8 @@ int
 	uint32_t                    region_left    = 0;
 	uint32_t                    region_width   = 0;
 	uint32_t                    region_height  = 0;
-	char*                       hwd_name       = NULL;
-	char*                       wfm_name       = NULL;
+	const char*                 hwd_name       = "None";
+	const char*                 wfm_name       = "AUTO";
 	bool                        is_refresh     = false;
 	char*                       image_file     = NULL;
 	short int                   image_x_offset = 0;
@@ -798,6 +818,8 @@ int
 	bool                        is_image       = false;
 	bool                        is_eval        = false;
 	bool                        is_interactive = false;
+	PenColor*                   fg_pen         = NULL;
+	PenColor*                   bg_pen         = NULL;
 	bool                        want_linecode  = false;
 	bool                        want_linecount = false;
 	bool                        want_lastrect  = false;
@@ -824,11 +846,12 @@ int
 	bool                        errfnd         = false;
 
 	// NOTE: c.f., https://codegolf.stackexchange.com/q/148228 to sort this mess when I need to find an available letter ;p
-	//       In fact, that's the current tally of alnum entries left: JjNnRUu
-	while (
-	    (opt = getopt_long(
-		 argc, argv, "y:x:Y:X:hfcmMprs::S:F:vqg:i:aeIC:B:LlP:A:oOTVt:bD::W:HEZzk::wd:GQK:", opts, &opt_index)) !=
-	    -1) {
+	//       In fact, that's the current tally of alnum entries left: NnRUu
+	while ((opt = getopt_long(argc,
+				  argv,
+				  "y:x:Y:X:hfcmMprs::S:F:vqg:i:j:J:aeIC:B:LlP:A:oOTVt:bD::W:HEZzk::wd:GQK:",
+				  opts,
+				  &opt_index)) != -1) {
 		switch (opt) {
 			case 'y':
 				if (strtol_hi(opt, NULL, optarg, &fbink_cfg.row) < 0) {
@@ -902,7 +925,7 @@ int
 				if (subopts && *subopts != '\0') {
 					// Only remember the first offending suboption list...
 					if (!errfnd) {
-						full_subopts = strdupa(subopts);    // lgtm [cpp/alloca-in-loop]
+						full_subopts = strdupa(subopts);
 					}
 				}
 
@@ -1095,7 +1118,7 @@ int
 				if (subopts && *subopts != '\0') {
 					// Only remember the first offending suboption list...
 					if (!errfnd) {
-						full_subopts = strdupa(subopts);    // lgtm [cpp/alloca-in-loop]
+						full_subopts = strdupa(subopts);
 					}
 				}
 				// NOTE: I'm not terribly fond of getsubopt in general, especially here with the comma limitation
@@ -1246,6 +1269,36 @@ int
 				image_file = optarg;
 				is_image   = true;
 				break;
+			case 'j':
+				// We might want to clamp to [0, 100]?
+				if (strtoul_hhu(opt, NULL, optarg, &fbink_cfg.saturation_boost) < 0) {
+					errfnd = true;
+				}
+				break;
+			case 'J':
+				if (strcasecmp(optarg, "S4") == 0) {
+					fbink_cfg.cfa_mode = CFA_AIE_S4;
+				} else if (strcasecmp(optarg, "S7") == 0) {
+					fbink_cfg.cfa_mode = CFA_AIE_S7;
+				} else if (strcasecmp(optarg, "S9") == 0) {
+					fbink_cfg.cfa_mode = CFA_AIE_S9;
+				} else if (strcasecmp(optarg, "G0") == 0) {
+					fbink_cfg.cfa_mode = CFA_G0;
+				} else if (strcasecmp(optarg, "G1") == 0) {
+					fbink_cfg.cfa_mode = CFA_G1;
+				} else if (strcasecmp(optarg, "G2") == 0) {
+					fbink_cfg.cfa_mode = CFA_G2;
+				} else if (strcasecmp(optarg, "NTX") == 0) {
+					fbink_cfg.cfa_mode = CFA_NTX;
+				} else if (strcasecmp(optarg, "SF") == 0) {
+					fbink_cfg.cfa_mode = CFA_NTX_SF;
+				} else if (strcasecmp(optarg, "SKIP") == 0) {
+					fbink_cfg.cfa_mode = CFA_SKIP;
+				} else {
+					ELOG("Unknown CFA mode '%s'.", optarg);
+					errfnd = true;
+				}
+				break;
 			case 'a':
 				fbink_cfg.ignore_alpha = true;
 				break;
@@ -1256,81 +1309,65 @@ int
 				is_interactive = true;
 				break;
 			case 'C':
+			case 'B': {
+				const bool fg  = opt == 'C';
+				uint8_t*   pen = fg ? &fbink_cfg.fg_color : &fbink_cfg.bg_color;
+
 				if (strcasecmp(optarg, "BLACK") == 0) {
-					fbink_cfg.fg_color = FG_BLACK;
+					*pen = fg ? FG_BLACK : BG_BLACK;
 				} else if (strcasecmp(optarg, "GRAY1") == 0) {
-					fbink_cfg.fg_color = FG_GRAY1;
+					*pen = fg ? FG_GRAY1 : BG_GRAY1;
 				} else if (strcasecmp(optarg, "GRAY2") == 0) {
-					fbink_cfg.fg_color = FG_GRAY2;
+					*pen = fg ? FG_GRAY2 : BG_GRAY2;
 				} else if (strcasecmp(optarg, "GRAY3") == 0) {
-					fbink_cfg.fg_color = FG_GRAY3;
+					*pen = fg ? FG_GRAY3 : BG_GRAY3;
 				} else if (strcasecmp(optarg, "GRAY4") == 0) {
-					fbink_cfg.fg_color = FG_GRAY4;
+					*pen = fg ? FG_GRAY4 : BG_GRAY4;
 				} else if (strcasecmp(optarg, "GRAY5") == 0) {
-					fbink_cfg.fg_color = FG_GRAY5;
+					*pen = fg ? FG_GRAY5 : BG_GRAY5;
 				} else if (strcasecmp(optarg, "GRAY6") == 0) {
-					fbink_cfg.fg_color = FG_GRAY6;
+					*pen = fg ? FG_GRAY6 : BG_GRAY6;
 				} else if (strcasecmp(optarg, "GRAY7") == 0) {
-					fbink_cfg.fg_color = FG_GRAY7;
+					*pen = fg ? FG_GRAY7 : BG_GRAY7;
 				} else if (strcasecmp(optarg, "GRAY8") == 0) {
-					fbink_cfg.fg_color = FG_GRAY8;
+					*pen = fg ? FG_GRAY8 : BG_GRAY8;
 				} else if (strcasecmp(optarg, "GRAY9") == 0) {
-					fbink_cfg.fg_color = FG_GRAY9;
+					*pen = fg ? FG_GRAY9 : BG_GRAY9;
 				} else if (strcasecmp(optarg, "GRAYA") == 0) {
-					fbink_cfg.fg_color = FG_GRAYA;
+					*pen = fg ? FG_GRAYA : BG_GRAYA;
 				} else if (strcasecmp(optarg, "GRAYB") == 0) {
-					fbink_cfg.fg_color = FG_GRAYB;
+					*pen = fg ? FG_GRAYB : BG_GRAYB;
 				} else if (strcasecmp(optarg, "GRAYC") == 0) {
-					fbink_cfg.fg_color = FG_GRAYC;
+					*pen = fg ? FG_GRAYC : BG_GRAYC;
 				} else if (strcasecmp(optarg, "GRAYD") == 0) {
-					fbink_cfg.fg_color = FG_GRAYD;
+					*pen = fg ? FG_GRAYD : BG_GRAYD;
 				} else if (strcasecmp(optarg, "GRAYE") == 0) {
-					fbink_cfg.fg_color = FG_GRAYE;
+					*pen = fg ? FG_GRAYE : BG_GRAYE;
 				} else if (strcasecmp(optarg, "WHITE") == 0) {
-					fbink_cfg.fg_color = FG_WHITE;
+					*pen = fg ? FG_WHITE : BG_WHITE;
 				} else {
-					ELOG("Unknown color name '%s'.", optarg);
-					errfnd = true;
+					uint8_t r, g, b, a = 0xFFu;
+					if (sscanf(optarg, "#%2hhx%2hhx%2hhx%2hhx", &r, &g, &b, &a) < 3) {
+						ELOG("Unknown color name '%s'.", optarg);
+						errfnd = true;
+					} else {
+						if (fg) {
+							fg_pen    = alloca(sizeof(*fg_pen));
+							fg_pen->r = r;
+							fg_pen->g = g;
+							fg_pen->b = b;
+							fg_pen->a = a;
+						} else {
+							bg_pen    = alloca(sizeof(*bg_pen));
+							bg_pen->r = r;
+							bg_pen->g = g;
+							bg_pen->b = b;
+							bg_pen->a = a;
+						}
+					}
 				}
 				break;
-			case 'B':
-				if (strcasecmp(optarg, "BLACK") == 0) {
-					fbink_cfg.bg_color = BG_BLACK;
-				} else if (strcasecmp(optarg, "GRAY1") == 0) {
-					fbink_cfg.bg_color = BG_GRAY1;
-				} else if (strcasecmp(optarg, "GRAY2") == 0) {
-					fbink_cfg.bg_color = BG_GRAY2;
-				} else if (strcasecmp(optarg, "GRAY3") == 0) {
-					fbink_cfg.bg_color = BG_GRAY3;
-				} else if (strcasecmp(optarg, "GRAY4") == 0) {
-					fbink_cfg.bg_color = BG_GRAY4;
-				} else if (strcasecmp(optarg, "GRAY5") == 0) {
-					fbink_cfg.bg_color = BG_GRAY5;
-				} else if (strcasecmp(optarg, "GRAY6") == 0) {
-					fbink_cfg.bg_color = BG_GRAY6;
-				} else if (strcasecmp(optarg, "GRAY7") == 0) {
-					fbink_cfg.bg_color = BG_GRAY7;
-				} else if (strcasecmp(optarg, "GRAY8") == 0) {
-					fbink_cfg.bg_color = BG_GRAY8;
-				} else if (strcasecmp(optarg, "GRAY9") == 0) {
-					fbink_cfg.bg_color = BG_GRAY9;
-				} else if (strcasecmp(optarg, "GRAYA") == 0) {
-					fbink_cfg.bg_color = BG_GRAYA;
-				} else if (strcasecmp(optarg, "GRAYB") == 0) {
-					fbink_cfg.bg_color = BG_GRAYB;
-				} else if (strcasecmp(optarg, "GRAYC") == 0) {
-					fbink_cfg.bg_color = BG_GRAYC;
-				} else if (strcasecmp(optarg, "GRAYD") == 0) {
-					fbink_cfg.bg_color = BG_GRAYD;
-				} else if (strcasecmp(optarg, "GRAYE") == 0) {
-					fbink_cfg.bg_color = BG_GRAYE;
-				} else if (strcasecmp(optarg, "WHITE") == 0) {
-					fbink_cfg.bg_color = BG_WHITE;
-				} else {
-					ELOG("Unknown color name '%s'.", optarg);
-					errfnd = true;
-				}
-				break;
+			}
 			case 'L':
 				want_linecode = true;
 				break;
@@ -1392,7 +1429,7 @@ int
 				if (subopts && *subopts != '\0') {
 					// Only remember the first offending suboption list...
 					if (!errfnd) {
-						full_subopts = strdupa(subopts);    // lgtm [cpp/alloca-in-loop]
+						full_subopts = strdupa(subopts);
 					}
 				}
 				while (subopts && *subopts != '\0' && !errfnd) {
@@ -1638,25 +1675,26 @@ int
 					// If no specific mode was passed, assume ORDERED
 					fbink_cfg.dithering_mode = HWD_ORDERED;
 				} else {
-					if (strcasecmp(optarg, "PASSTHROUGH") == 0) {
+					if (optarg[0] == 'P' || optarg[0] == 'p') {
 						fbink_cfg.dithering_mode = HWD_PASSTHROUGH;
-					} else if (strcasecmp(optarg, "FLOYD_STEINBERG") == 0) {
+					} else if (optarg[0] == 'F' || optarg[0] == 'f') {
 						fbink_cfg.dithering_mode = HWD_FLOYD_STEINBERG;
-					} else if (strcasecmp(optarg, "ATKINSON") == 0) {
+						hwd_name                 = "Floyd-Steinberg";
+					} else if (optarg[0] == 'A' || optarg[0] == 'a') {
 						fbink_cfg.dithering_mode = HWD_ATKINSON;
-					} else if (strcasecmp(optarg, "ORDERED") == 0) {
+						hwd_name                 = "Atkinson";
+					} else if (optarg[0] == 'O' || optarg[0] == 'o') {
 						fbink_cfg.dithering_mode = HWD_ORDERED;
-					} else if (strcasecmp(optarg, "QUANT_ONLY") == 0) {
+						hwd_name                 = "Ordered";
+					} else if (optarg[0] == 'Q' || optarg[0] == 'q') {
 						fbink_cfg.dithering_mode = HWD_QUANT_ONLY;
-					} else if (strcasecmp(optarg, "LEGACY") == 0) {
+						hwd_name                 = "Quantize";
+					} else if (optarg[0] == 'L' || optarg[0] == 'l') {
 						fbink_cfg.dithering_mode = HWD_LEGACY;
+						hwd_name                 = "Legacy";
 					} else {
 						ELOG("Unknown hardware dithering algorithm '%s'.", optarg);
 						errfnd = true;
-					}
-					// Remember non-default values in a human-readable format...
-					if (fbink_cfg.dithering_mode != HWD_PASSTHROUGH) {
-						hwd_name = optarg;
 					}
 				}
 				break;
@@ -1718,8 +1756,14 @@ int
 				*/
 				} else if (strcasecmp(optarg, "GCC16") == 0) {
 					fbink_cfg.wfm_mode = WFM_GCC16;
+				} else if (strcasecmp(optarg, "GLRC16") == 0) {
+					fbink_cfg.wfm_mode = WFM_GLRC16;
 				} else if (strcasecmp(optarg, "DUNM") == 0) {
 					fbink_cfg.wfm_mode = WFM_DUNM;
+				} else if (strcasecmp(optarg, "GCCK16") == 0) {
+					fbink_cfg.wfm_mode = WFM_GCCK16;
+				} else if (strcasecmp(optarg, "GLRCK16") == 0) {
+					fbink_cfg.wfm_mode = WFM_GLRCK16;
 				} else {
 					ELOG("Unknown waveform update mode '%s'.", optarg);
 					errfnd = true;
@@ -1769,7 +1813,7 @@ int
 				if (subopts && *subopts != '\0') {
 					// Only remember the first offending suboption list...
 					if (!errfnd) {
-						full_subopts = strdupa(subopts);    // lgtm [cpp/alloca-in-loop]
+						full_subopts = strdupa(subopts);
 					}
 				}
 
@@ -1881,7 +1925,7 @@ int
 				if (subopts && *subopts != '\0') {
 					// Only remember the first offending suboption list...
 					if (!errfnd) {
-						full_subopts = strdupa(subopts);    // lgtm [cpp/alloca-in-loop]
+						full_subopts = strdupa(subopts);
 					}
 				}
 
@@ -2095,6 +2139,14 @@ int
 		goto cleanup;
 	}
 
+	// Set custom pen colors, if any
+	if (fg_pen) {
+		fbink_set_fg_pen_rgba(fg_pen->r, fg_pen->g, fg_pen->b, fg_pen->a, false, false);
+	}
+	if (bg_pen) {
+		fbink_set_bg_pen_rgba(bg_pen->r, bg_pen->g, bg_pen->b, bg_pen->a, false, false);
+	}
+
 	// Did we request an animated refresh?
 	if (fbink_cfg.is_animated) {
 		if (fbink_mtk_set_swipe_data(direction, steps) != EXIT_SUCCESS) {
@@ -2141,36 +2193,32 @@ int
 
 		// In the middle of the screen
 		fbink_cfg.is_halfway = true;
+		// Make it backgroundless, to play nicer with whatever might already be on the edge of the screen.
+		// It also ensures we only get the bar's width instead of the screen's in our get_last_rect trick below.
+		fbink_cfg.is_bgless  = true;
 
 		// Start by clearing the bar's region to white, to make sure A2 will behave...
-		// NOTE: Commented out for now, as the chance of hitting the flags bug for this on Mk. 7 is low enough,
-		//       and the quick succession of GC16 + A2 with no fencing causes a tearing artifact on the first refresh.
-		/*
-		fbink_cfg.wfm_mode = WFM_GC16;
-		// We could use a fbink_grid_clear, but instead duplicate a bit of positioning logic instead for exact results...
-		//fbink_grid_clear(fbfd, (unsigned short int) (fbink_state.max_cols - 1U), 1U, &fbink_cfg);
-		short int                row = (short int) (fbink_state.max_rows / 2U);
-		const unsigned short int top_pos =
-		    (unsigned short int) MAX(0 + (fbink_state.view_vert_origin - fbink_state.view_vert_offset),
-					     ((row * fbink_state.font_h) + fbink_state.view_vert_origin));
-		const unsigned short int left_pos = fbink_state.view_hori_origin;
-		const unsigned short int bar_width =
-		    (unsigned short int) ((0.90f * (float) fbink_state.view_width) + 0.5f);
-		const unsigned short int bar_left =
-		    (unsigned short int) (left_pos + (0.05f * (float) fbink_state.view_width) + 0.5f);
-		const FBInkRect region = {
-			.left   = bar_left,
-			.top    = top_pos,
-			.width  = bar_width,
-			.height = fbink_state.font_h,
-		};
-		fbink_cls(fbfd, &fbink_cfg, &region, false);
-		*/
+		// NOTE: Only used on MTK devices, as the chance of hitting the flags bug for this on Mk. 7 is low enough,
+		//       and in its initial implementation,
+		//       the quick succession of GC16 + A2 with no fencing causes a tearing artifact on the first refresh.
+		//       (We did end up using a fully fenced GC16 + FULL for the final implementation).
+		if (fbink_state.is_mtk) {
+			// Draw a dummy bar without a refresh just so we can get its exact dimensions
+			fbink_cfg.no_refresh = true;
+			fbink_print_activity_bar(fbfd, 0, &fbink_cfg);
+			FBInkRect region     = fbink_get_last_rect(false);
+			fbink_cfg.no_refresh = false;
 
-		// Make it backgroundless, to play nicer with whatever might already be on the edge of the screen
-		fbink_cfg.is_bgless = true;
+			// Then flash that region to white to pave the way for A2
+			fbink_cfg.wfm_mode    = WFM_GC16;
+			fbink_cfg.is_flashing = true;
+			fbink_cls(fbfd, &fbink_cfg, &region, false);
+			fbink_wait_for_complete(fbfd, LAST_MARKER);
+			fbink_cfg.is_flashing = false;
+		}
+
 		// Fast
-		fbink_cfg.wfm_mode  = WFM_A2;
+		fbink_cfg.wfm_mode = WFM_A2;
 
 		// Infinite activity bar
 		is_activitybar = true;
@@ -2179,6 +2227,24 @@ int
 
 	// If we're asking to run in daemon mode, that takes precedence over nearly everything.
 	if (is_daemon) {
+		// If we want to use a custom pipe name, honor that...
+		const char* custom_pipe = getenv("FBINK_NAMED_PIPE");
+		if (custom_pipe) {
+			pipe_path = custom_pipe;
+		} else {
+			pipe_path = FBINK_PIPE;
+		}
+
+		// Start by creating our named pipe.
+		// NOTE: You cannot re-use an existing pipe!
+		rv = mkfifo(pipe_path, 0666);
+		if (rv != 0) {
+			PFWARN("mkfifo(%s): %m", pipe_path);
+			// Make sure we won't delete the pipe, in case it's not ours...
+			pipe_path = NULL;
+			goto cleanup;
+		}
+
 		// Fly, little daemon!
 		if (daemonize() != 0) {
 			WARN("Failed to daemonize, aborting");
@@ -2201,24 +2267,6 @@ int
 		}
 		if ((rv = sigaction(SIGQUIT, &new_action, NULL)) != 0) {
 			PFWARN("sigaction (QUIT): %m");
-			goto cleanup;
-		}
-
-		// If we want to use a custom pipe name, honor that...
-		const char* custom_pipe = getenv("FBINK_NAMED_PIPE");
-		if (custom_pipe) {
-			pipe_path = custom_pipe;
-		} else {
-			pipe_path = FBINK_PIPE;
-		}
-
-		// Start by creating our named pipe.
-		// NOTE: You cannot re-use an existing pipe!
-		rv = mkfifo(pipe_path, 0666);
-		if (rv != 0) {
-			PFWARN("mkfifo(%s): %m", pipe_path);
-			// Make sure we won't delete the pipe, in case it's not ours...
-			pipe_path = NULL;
 			goto cleanup;
 		}
 
@@ -2304,45 +2352,69 @@ int
 						goto cleanup;
 					}
 
-					// NOTE: In every case, we *ignore* errors in order not to silently die on bogus input...
-					// If we're drawing a bar, make sure we were fed vaguely valid input...
-					if (is_progressbar || is_activitybar) {
-						uint8_t bar_val = 0U;
-						if (strtoul_hhu('d', NULL, buf, &bar_val) == 0) {
-							// It's a number, let the API deal with OOB values.
-							if (is_progressbar) {
-								fbink_print_progress_bar(fbfd, bar_val, &fbink_cfg);
-							} else {
-								fbink_print_activity_bar(fbfd, bar_val, &fbink_cfg);
+					// In case we were fed explicit LFs, split our input into multiple parts,
+					// so as to be able to honor daemon_lines properly...
+					// NOTE: Due to how strtok behaves, consecutive LFs (in a single read) will be coalesced into a single LF!
+					// NOTE: This also implies that we no longer feed *any* LF to fbink_print
+					//       (which, for information, are *rendered* as a single cell space!)
+					// NOTE: This also means that, if you want to effectively skip a line,
+					//       you'll have to pad with blanks yourself as necessary, e.g.,
+					//       echo "1\n \n \n \n5" > /tmp/fbink-fifo
+					// NOTE: This new behavior was originally implemented in 33203a1
+					char* saveptr = NULL;
+					for (char* str = buf;; str = NULL) {
+						char* line = strtok_r(str, "\n", &saveptr);
+						if (!line) {
+							break;
+						}
+
+						// NOTE: In every case, we *ignore* errors in order not to silently die on bogus input...
+						// If we're drawing a bar, make sure we were fed vaguely valid input...
+						if (is_progressbar || is_activitybar) {
+							uint8_t bar_val = 0U;
+							// NOTE: Don't balk on trailing garbage here, mainly for pv's sake, which adds a trailing LF
+							if (strtoul_hhu_lax('d', NULL, line, &bar_val) == 0) {
+								// It's a number, let the API deal with OOB values.
+								if (is_progressbar) {
+									fbink_print_progress_bar(
+									    fbfd, bar_val, &fbink_cfg);
+								} else {
+									fbink_print_activity_bar(
+									    fbfd, bar_val, &fbink_cfg);
+								}
 							}
-						}
-					} else if (is_truetype) {
-						linecount = fbink_print_ot(fbfd, buf, &ot_config, &fbink_cfg, &ot_fit);
+						} else if (is_truetype) {
+							linecount =
+							    fbink_print_ot(fbfd, line, &ot_config, &fbink_cfg, &ot_fit);
 
-						// Move to the next line, unless it'd make us blow past daemon_lines...
-						total_lines = (unsigned short int) (total_lines + ot_fit.rendered_lines);
-						// NOTE: A return value of 0 means not enough space for a new line...
-						if ((daemon_lines == 0U || total_lines < daemon_lines) && linecount > 0) {
-							ot_config.margins.top = (short int) linecount;
+							// Move to the next line, unless it'd make us blow past daemon_lines...
+							total_lines =
+							    (unsigned short int) (total_lines + ot_fit.rendered_lines);
+							// NOTE: A return value of 0 means not enough space for a new line...
+							if ((daemon_lines == 0U || total_lines < daemon_lines) &&
+							    linecount > 0) {
+								ot_config.margins.top = (short int) linecount;
+							} else {
+								// Reset to original settings...
+								total_lines           = 0U;
+								ot_config.margins.top = (short int) initial_top;
+							}
 						} else {
-							// Reset to original settings...
-							total_lines           = 0U;
-							ot_config.margins.top = (short int) initial_top;
-						}
-					} else {
-						linecount = fbink_print(fbfd, buf, &fbink_cfg);
+							linecount = fbink_print(fbfd, line, &fbink_cfg);
 
-						// Move to the next line, unless it'd make us blow past daemon_lines...
-						if (linecount > 0) {
-							total_lines = (unsigned short int) (total_lines + linecount);
-						}
-						if ((daemon_lines == 0U || total_lines < daemon_lines) &&
-						    linecount >= 0) {
-							fbink_cfg.row = (short int) (fbink_cfg.row + linecount);
-						} else {
-							// Reset to original settings...
-							total_lines   = 0U;
-							fbink_cfg.row = initial_row;
+							// Move to the next line, unless it'd make us blow past daemon_lines...
+							if (linecount > 0) {
+								total_lines =
+								    (unsigned short int) (total_lines + linecount);
+							}
+							if ((daemon_lines == 0U || total_lines < daemon_lines) &&
+							    linecount >= 0) {
+								fbink_cfg.row = (short int) (fbink_cfg.row + linecount);
+							} else {
+								// Reset to original settings...
+								total_lines   = 0U;
+								fbink_cfg.row = initial_row;
+							}
 						}
 					}
 				}
@@ -2400,8 +2472,8 @@ int
 					    fbink_cfg.is_halfway ? "Y" : "N",
 					    fbink_cfg.valign,
 					    fbink_cfg.is_cleared ? "Y" : "N",
-					    wfm_name ? wfm_name : "AUTO",
-					    hwd_name ? hwd_name : "PASSTHROUGH",
+					    wfm_name,
+					    hwd_name,
 					    fbink_cfg.is_nightmode ? "Y" : "N",
 					    fbink_cfg.no_refresh ? "Y" : "N");
 				}
@@ -2458,8 +2530,8 @@ int
 					    fbink_cfg.is_padded ? "Y" : "N",
 					    fbink_cfg.is_rpadded ? "Y" : "N",
 					    fbink_cfg.is_cleared ? "Y" : "N",
-					    wfm_name ? wfm_name : "AUTO",
-					    hwd_name ? hwd_name : "PASSTHROUGH",
+					    wfm_name,
+					    hwd_name,
 					    fbink_cfg.is_nightmode ? "Y" : "N",
 					    fbink_cfg.no_refresh ? "Y" : "N",
 					    fbink_cfg.fontname,
@@ -2512,11 +2584,14 @@ int
 			if (is_truetype) {
 				// OT has a more detailed feedback, with the line-breaking computation results,
 				// so it's in an eval friendly format instead...
-				printf("next_top=%hu;computed_lines=%hu;rendered_lines=%hu;truncated=%d;",
-				       total_lines,
-				       ot_fit.computed_lines,
-				       ot_fit.rendered_lines,
-				       ot_fit.truncated);
+				printf(
+				    "next_top=%hu;computed_lines=%hu;rendered_lines=%hu;bbox_width=%hu;bbox_height=%hu;truncated=%d;",
+				    total_lines,
+				    ot_fit.computed_lines,
+				    ot_fit.rendered_lines,
+				    ot_fit.bbox.width,
+				    ot_fit.bbox.height,
+				    ot_fit.truncated);
 			} else {
 				printf("%hu", total_lines);
 			}
@@ -2530,8 +2605,8 @@ int
 				    region_width,
 				    region_height,
 				    fbink_cfg.is_flashing ? "a flashing " : "",
-				    wfm_name ? wfm_name : "AUTO",
-				    hwd_name ? hwd_name : "PASSTHROUGH",
+				    wfm_name,
+				    hwd_name,
 				    fbink_cfg.is_nightmode ? "Y" : "N");
 			}
 			if (fbink_refresh(fbfd, region_top, region_left, region_width, region_height, &fbink_cfg) !=
@@ -2561,8 +2636,8 @@ int
 				    fbink_cfg.valign,
 				    fbink_cfg.is_inverted ? "Y" : "N",
 				    fbink_cfg.ignore_alpha ? "Y" : "N",
-				    wfm_name ? wfm_name : "AUTO",
-				    hwd_name ? hwd_name : "PASSTHROUGH",
+				    wfm_name,
+				    hwd_name,
 				    fbink_cfg.sw_dithering ? "Y" : "N",
 				    fbink_cfg.is_nightmode ? "Y" : "N",
 				    fbink_cfg.no_refresh ? "Y" : "N");
@@ -2596,8 +2671,8 @@ int
 				    fbink_cfg.is_flashing ? "Y" : "N",
 				    fbink_cfg.is_halfway ? "Y" : "N",
 				    fbink_cfg.is_cleared ? "Y" : "N",
-				    wfm_name ? wfm_name : "AUTO",
-				    hwd_name ? hwd_name : "PASSTHROUGH",
+				    wfm_name,
+				    hwd_name,
 				    fbink_cfg.is_nightmode ? "Y" : "N",
 				    fbink_cfg.no_refresh ? "Y" : "N",
 				    fbink_cfg.fontname,
@@ -2631,8 +2706,8 @@ int
 					    fbink_cfg.is_flashing ? "Y" : "N",
 					    fbink_cfg.is_halfway ? "Y" : "N",
 					    fbink_cfg.is_cleared ? "Y" : "N",
-					    wfm_name ? wfm_name : "AUTO",
-					    hwd_name ? hwd_name : "PASSTHROUGH",
+					    wfm_name,
+					    hwd_name,
 					    fbink_cfg.is_nightmode ? "Y" : "N",
 					    fbink_cfg.no_refresh ? "Y" : "N");
 				}
@@ -2655,8 +2730,8 @@ int
 					    fbink_cfg.is_flashing ? "Y" : "N",
 					    fbink_cfg.is_halfway ? "Y" : "N",
 					    fbink_cfg.is_cleared ? "Y" : "N",
-					    wfm_name ? wfm_name : "AUTO",
-					    hwd_name ? hwd_name : "PASSTHROUGH",
+					    wfm_name,
+					    hwd_name,
 					    fbink_cfg.is_nightmode ? "Y" : "N",
 					    fbink_cfg.no_refresh ? "Y" : "N");
 				}
@@ -2868,10 +2943,12 @@ int
 					if (want_linecount) {
 						if (is_truetype) {
 							printf(
-							    "next_top=%hu;computed_lines=%hu;rendered_lines=%hu;truncated=%d;",
+							    "next_top=%hu;computed_lines=%hu;rendered_lines=%hu;bbox_width=%hu;bbox_height=%hu;truncated=%d;",
 							    totallines,
 							    ot_fit.computed_lines,
 							    ot_fit.rendered_lines,
+							    ot_fit.bbox.width,
+							    ot_fit.bbox.height,
 							    ot_fit.truncated);
 						} else {
 							printf("%hu", totallines);

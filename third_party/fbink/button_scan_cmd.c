@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -55,15 +55,15 @@ int
 	int                        opt;
 	int                        opt_index;
 	static const struct option opts[] = {
-		{  "press", no_argument, NULL, 'p'},
-		{   "wait", no_argument, NULL, 'w'},
-		{ "unplug", no_argument, NULL, 'u'},
-		{   "both", no_argument, NULL, 'b'},
-		{   "help", no_argument, NULL, 'h'},
-		{"verbose", no_argument, NULL, 'v'},
-		{  "quiet", no_argument, NULL, 'q'},
-		{ "syslog", no_argument, NULL, 'G'},
-		{     NULL,           0, NULL,   0}
+		{   "press", no_argument, NULL, 'p' },
+		{    "wait", no_argument, NULL, 'w' },
+		{  "unplug", no_argument, NULL, 'u' },
+		{    "both", no_argument, NULL, 'b' },
+		{    "help", no_argument, NULL, 'h' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{   "quiet", no_argument, NULL, 'q' },
+		{  "syslog", no_argument, NULL, 'G' },
+		{      NULL,           0, NULL,   0 }
 	};
 
 	FBInkConfig fbink_cfg = { 0U };
@@ -120,8 +120,8 @@ int
 	int rv = EXIT_SUCCESS;
 
 	// Open framebuffer and keep it around, then setup globals.
-	int fbfd = -1;
-	if (ERRCODE(EXIT_FAILURE) == (fbfd = fbink_open())) {
+	int fbfd = fbink_open();
+	if (fbfd == ERRCODE(EXIT_FAILURE)) {
 		fprintf(stderr, "Failed to open the framebuffer, aborting . . .\n");
 		return ERRCODE(EXIT_FAILURE);
 	}

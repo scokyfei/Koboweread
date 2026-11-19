@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -35,29 +35,40 @@
 // List of flags for device or screen-specific quirks...
 typedef struct
 {
-	unsigned short int screenDPI;
-	DEVICE_ID_T        deviceId;
-	char               deviceName[16];
-	char               deviceCodename[16];
-	char               devicePlatform[16];
-	bool               isPerfectFit;
-	bool               isSunxi;
-	bool               isKindleLegacy;
-	bool               isKindlePearlScreen;
-	bool               isKindleZelda;
-	bool               isKindleRex;
-	bool               isKindleMTK;
-	bool               isKoboNonMT;
-	bool               isNTX16bLandscape;
-	bool               isKoboMk7;
-	int8_t             koboVertOffset;
-	uint8_t            ntxBootRota;
-	NTX_ROTA_INDEX_T   ntxRotaQuirk;
-	bool               unreliableWaitFor;
-	bool               canRotate;
-	bool               canHWInvert;
-	bool               hasEclipseWfm;
-	bool               skipId;
+	unsigned short int  screenDPI;
+	DEVICE_ID_T         deviceId;
+	char                deviceName[32];
+	char                deviceCodename[32];
+	char                devicePlatform[32];
+	bool                isPerfectFit;
+	bool                isMTK;
+	bool                isSunxi;
+	bool                isTolino;
+	bool                isKindleLegacy;
+	bool                isKindlePearlScreen;
+	bool                isKindleZelda;
+	bool                isKindleRex;
+	bool                isKindleBellatrix4;
+	bool                isKoboNonMT;
+	bool                isNTX16bLandscape;
+	bool                isKoboMk7;
+	int8_t              koboVertOffset;
+	uint8_t             ntxBootRota;
+	NTX_ROTA_INDEX_T    ntxRotaQuirk;
+	uint8_t             rotationMap[4];    // Index is native, value is canonical
+	bool                touchSwapAxes;
+	bool                touchMirrorX;
+	bool                touchMirrorY;
+	bool                unreliableWaitFor;
+	bool                canWakeEPDC;
+	bool                canRotate;
+	bool                canHWInvert;
+	bool                hasEclipseWfm;
+	bool                canWaitForSubmission;
+	bool                hasColorPanel;
+	FBINK_PXFMT_INDEX_T pixelFormat;
+	bool isRGB;    // i.e., RGB565, RGB24, RGBA or RGB32. Allows us to simplify some internal checks for RGB order.
+	bool skipId;
 } FBInkDeviceQuirks;
 
 // An (x, y) coordinates tuple
@@ -149,7 +160,12 @@ typedef union
 // (We need a single data type because of our function pointers shenanigans...)
 typedef union
 {
+	uint32_t       p;
 	FBInkPixelBGRA bgra;
+	FBInkPixelRGBA rgba;
+	uint24_t       rgb24;
+	FBInkPixelBGR  bgr;
+	FBInkPixelRGB  rgb;
 	uint16_t       rgb565;
 	uint8_t        gray8;    // Will point to bgra.color.b
 	struct
@@ -188,7 +204,7 @@ typedef enum
 	CH_BOLD_ITALIC,
 	CH_MAX = 0xFFu,    // uint8_t
 } __attribute__((packed)) CHARACTER_FONT_E;
-typedef uint8_t CHARACTER_FONT_T;
+typedef uint8_t           CHARACTER_FONT_T;
 #endif    // FBINK_WITH_OPENTYPE
 
 #ifdef FBINK_FOR_KOBO

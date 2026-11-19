@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -132,50 +132,64 @@ static void compute_lastrect(void);
 static void recap_lastrect(void);
 static void print_lastrect(void);
 
+// FBInkPixel-like
+typedef struct
+{
+	uint8_t r;
+	uint8_t g;
+	uint8_t b;
+	uint8_t a;
+} PenColor;
+
 // Sprinkle a bit of C11 in there...
 // c.f., http://www.robertgamble.net/2012/01/c11-generic-selections.html
 #define TYPENAME(x)                                                                                                      \
-	_Generic((x), _Bool                                                                                              \
-		 : "bool", char                                                                                          \
-		 : "char", signed char                                                                                   \
-		 : "signed char", unsigned char                                                                          \
-		 : "unsigned char", short int                                                                            \
-		 : "short int", unsigned short int                                                                       \
-		 : "unsigned short int", int                                                                             \
-		 : "int", unsigned int                                                                                   \
-		 : "unsigned int", long int                                                                              \
-		 : "long int", unsigned long int                                                                         \
-		 : "unsigned long int", float                                                                            \
-		 : "float", default                                                                                      \
-		 : "other")
+	_Generic((x),                                                                                                    \
+	    _Bool: "bool",                                                                                               \
+	    char: "char",                                                                                                \
+	    signed char: "signed char",                                                                                  \
+	    unsigned char: "unsigned char",                                                                              \
+	    short int: "short int",                                                                                      \
+	    unsigned short int: "unsigned short int",                                                                    \
+	    int: "int",                                                                                                  \
+	    unsigned int: "unsigned int",                                                                                \
+	    long int: "long int",                                                                                        \
+	    unsigned long int: "unsigned long int",                                                                      \
+	    float: "float",                                                                                              \
+	    default: "other")
 
 #define TYPEMIN(x)                                                                                                       \
-	_Generic((x), _Bool                                                                                              \
-		 : false, char                                                                                           \
-		 : CHAR_MIN, signed char                                                                                 \
-		 : SCHAR_MIN, unsigned char     : 0U, short int                                                          \
-		 : SHRT_MIN, unsigned short int : 0U, int                                                                \
-		 : INT_MIN, unsigned int        : 0U, long int                                                           \
-		 : LONG_MIN, unsigned long int  : 0U, float                                                              \
-		 : -HUGE_VALF, default                                                                                   \
-		 : -42)
+	_Generic((x),                                                                                                    \
+	    _Bool: false,                                                                                                \
+	    char: CHAR_MIN,                                                                                              \
+	    signed char: SCHAR_MIN,                                                                                      \
+	    unsigned char: 0U,                                                                                           \
+	    short int: SHRT_MIN,                                                                                         \
+	    unsigned short int: 0U,                                                                                      \
+	    int: INT_MIN,                                                                                                \
+	    unsigned int: 0U,                                                                                            \
+	    long int: LONG_MIN,                                                                                          \
+	    unsigned long int: 0U,                                                                                       \
+	    float: -HUGE_VALF,                                                                                           \
+	    default: -42)
 
 #define TYPEMAX(x)                                                                                                       \
-	_Generic((x), _Bool                                                                                              \
-		 : true, char                                                                                            \
-		 : CHAR_MAX, signed char                                                                                 \
-		 : SCHAR_MAX, unsigned char                                                                              \
-		 : UCHAR_MAX, short int                                                                                  \
-		 : SHRT_MAX, unsigned short int                                                                          \
-		 : USHRT_MAX, int                                                                                        \
-		 : INT_MAX, unsigned int                                                                                 \
-		 : UINT_MAX, long int                                                                                    \
-		 : LONG_MAX, unsigned long int                                                                           \
-		 : ULONG_MAX, float                                                                                      \
-		 : HUGE_VALF, default : 42)
+	_Generic((x),                                                                                                    \
+	    _Bool: true,                                                                                                 \
+	    char: CHAR_MAX,                                                                                              \
+	    signed char: SCHAR_MAX,                                                                                      \
+	    unsigned char: UCHAR_MAX,                                                                                    \
+	    short int: SHRT_MAX,                                                                                         \
+	    unsigned short int: USHRT_MAX,                                                                               \
+	    int: INT_MAX,                                                                                                \
+	    unsigned int: UINT_MAX,                                                                                      \
+	    long int: LONG_MAX,                                                                                          \
+	    unsigned long int: ULONG_MAX,                                                                                \
+	    float: HUGE_VALF,                                                                                            \
+	    default: 42)
 
 // And now we can implement generic, checked strtoul/strtol macros!
-#define strtoul_chk(opt, subopt, str, result)                                                                            \
+#define strtoul_chk(opt, subopt, str, result, strict)                                                                    \
 	({                                                                                                               \
 		/* NOTE: We want to *reject* negative values (which strtoul does not)! */                                \
 		if (strchr(str, '-')) {                                                                                  \
@@ -209,8 +223,8 @@ static void print_lastrect(void);
 		}                                                                                                        \
                                                                                                                          \
 		/* If we got here, strtoul() successfully parsed at least part of a number. */                           \
-		/* But we do want to enforce the fact that the input really was *only* an integer value. */              \
-		if (*endptr != '\0') {                                                                                   \
+		/* But we (by default) do want to enforce the fact that the input really was *only* an integer value. */ \
+		if (strict && *endptr != '\0') {                                                                         \
 			ELOG(                                                                                            \
 			    "Found trailing characters (%s) behind value '%lu' assigned from string '%s' "               \
 			    "to an option (%c%s%s) expecting an %s.",                                                    \
@@ -243,7 +257,7 @@ static void print_lastrect(void);
 		return EXIT_SUCCESS;                                                                                     \
 	})
 
-#define strtol_chk(opt, subopt, str, result)                                                                             \
+#define strtol_chk(opt, subopt, str, result, strict)                                                                     \
 	({                                                                                                               \
 		/* Go on with strtol... */                                                                               \
 		char* endptr;                                                                                            \
@@ -266,8 +280,8 @@ static void print_lastrect(void);
 		}                                                                                                        \
                                                                                                                          \
 		/* If we got here, strtol() successfully parsed at least part of a number. */                            \
-		/* But we do want to enforce the fact that the input really was *only* an integer value. */              \
-		if (*endptr != '\0') {                                                                                   \
+		/* But we (by default) do want to enforce the fact that the input really was *only* an integer value. */ \
+		if (strict && *endptr != '\0') {                                                                         \
 			ELOG(                                                                                            \
 			    "Found trailing characters (%s) behind value '%ld' assigned from string '%s' "               \
 			    "to an option (%c%s%s) expecting a %s.",                                                     \
@@ -300,7 +314,7 @@ static void print_lastrect(void);
 		return EXIT_SUCCESS;                                                                                     \
 	})
 
-#define strtof_chk(opt, subopt, str, result)                                                                             \
+#define strtof_chk(opt, subopt, str, result, strict)                                                                     \
 	({                                                                                                               \
 		/* NOTE: We want to *reject* negative values */                                                          \
 		if (strchr(str, '-')) {                                                                                  \
@@ -346,8 +360,8 @@ static void print_lastrect(void);
 		}                                                                                                        \
                                                                                                                          \
 		/* If we got here, strtof() successfully parsed at least part of a number. */                            \
-		/* But we do want to enforce the fact that the input really was *only* a decimal value. */               \
-		if (*endptr != '\0') {                                                                                   \
+		/* But we (by default) do want to enforce the fact that the input really was *only* a decimal value. */  \
+		if (strict && *endptr != '\0') {                                                                         \
 			ELOG(                                                                                            \
 			    "Found trailing characters (%s) behind value '%f' assigned from string '%s' "                \
 			    "to an option (%c%s%s) expecting a %s.",                                                     \
@@ -396,6 +410,7 @@ static void print_lastrect(void);
 static int strtoul_u(int, const char*, const char*, uint32_t*);
 static int strtoul_hu(int, const char*, const char*, uint16_t*);
 static int strtoul_hhu(int, const char*, const char*, uint8_t*);
+static int strtoul_hhu_lax(int, const char*, const char*, uint8_t*);
 static int strtol_hi(int, const char*, const char*, short int*);
 static int strtol_hhi(int, const char*, const char*, int8_t*);
 static int strtof_pos(int, const char*, const char*, float*);

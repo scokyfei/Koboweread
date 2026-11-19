@@ -1,6 +1,6 @@
-微信读书 1.8.8 安装包（Kobo Libra 2 + KOReader）
+微信读书 1.8.8 安装包（Kobo Libra 2 / Libra Colour + KOReader）
 
-适用：Kobo Libra 2，固件 4.34.20097 或 4.38.23852，KOReader 装在 .adds/koreader。
+适用：Kobo Libra 2（固件 4.34.20097 或 4.38.23852），或 Kobo Libra Colour（固件 4.42.23303）；KOReader 装在 .adds/koreader。
 需要：约 2.3 GB 可用空间；Wi-Fi；一个微信账号（扫码登录）。
 
 安装
@@ -18,4 +18,4 @@
 
 注意
 - 实测同一账号在同一台 Kobo 的两个微信读书版本之间只能保持一边登录；登录新安装会让另一边退出。
-- Android 所需的内核模块按固件内核分别提供；安装包里没有当前内核的模块时安装会停止。4.34.20097 与 4.38.23852 都在实机上验证过。
+- Android 所需的内核模块按固件内核分别提供；安装包里没有当前内核的模块时安装会停止。4.34.20097 与 4.38.23852 都在实机上验证过；Libra Colour 4.42.23303 由 Koboweread-Colour 移植。

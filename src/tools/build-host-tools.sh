@@ -36,7 +36,18 @@ done
 # tune2fs (2026-11-10): adds or removes the journal of the Android image
 # (ext2 <-> ext4 with a journal, docs/1.9.7版本.md).
 (cd "$w/obj" && make -j4 -C misc tune2fs.static >> "$w/make.log" 2>&1) || { echo "TUNE2FS_BUILD_FAILED (see $w)" >&2;exit 4; }
-"$zig" objcopy --strip-all "$w/obj/misc/tune2fs.static" "$out/tune2fs"
+# zig 0.13 builds its objcopy as a host program, which fails to link on newer
+# macOS releases (undefined _sigaction/_bzero); fall back to llvm-objcopy
+# (KOBO_OBJCOPY, PATH, or Homebrew's llvm).
+strip_all(){
+ if [ -n "${KOBO_OBJCOPY:-}" ];then "$KOBO_OBJCOPY" --strip-all "$1" "$2";return;fi
+ "$zig" objcopy --strip-all "$1" "$2" 2>/dev/null && return
+ for c in llvm-objcopy /opt/homebrew/opt/llvm/bin/llvm-objcopy /usr/local/opt/llvm/bin/llvm-objcopy;do
+  if command -v "$c" >/dev/null 2>&1;then "$c" --strip-all "$1" "$2";return;fi
+ done
+ echo "HOST_TOOLS_NO_OBJCOPY (set KOBO_OBJCOPY to an ELF objcopy)" >&2;return 1
+}
+strip_all "$w/obj/misc/tune2fs.static" "$out/tune2fs"
 # The deployed copy (sha 5302506c...) is e2fsck.static with strip-all.
-"$zig" objcopy --strip-all "$w/obj/e2fsck/e2fsck.static" "$out/e2fsck"
+strip_all "$w/obj/e2fsck/e2fsck.static" "$out/e2fsck"
 echo "HOST_TOOLS_DONE $out"

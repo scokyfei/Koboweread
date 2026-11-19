@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -207,6 +207,17 @@ static int
 		case DEVICE_KOBO_SAGE:
 			// NOTE: On the Sage (PCB index 98), this is left at EBRMAIN_ROTATE_R_0.
 			break;
+		case DEVICE_KOBO_ELIPSA_2E:
+		case DEVICE_KOBO_LIBRA_COLOUR:
+			// NOTE: On MTK, stuff appears to be inverted (and hard-coded that way),
+			//       exactly like on devices that would previously have been flagged EBRMAIN_ROTATE_R_180...
+			// NOTE: We currently don't actually ever call this on MTK, but hey, it works regardless ;).
+			if (rota >= 0) {
+				rota = rota ^ 2;
+			} else {
+				rota = rota ^ 3;
+			}
+			break;
 		default:
 			WARN("Unsupported KX122 translation for this device");
 			break;
@@ -303,6 +314,8 @@ static int
 	switch (deviceQuirks.deviceId) {
 		case DEVICE_KOBO_ELIPSA:
 		case DEVICE_KOBO_SAGE:
+		case DEVICE_KOBO_ELIPSA_2E:
+		case DEVICE_KOBO_LIBRA_COLOUR:
 			// kx122
 			rv = query_kx122();
 			if (rv < 0) {
@@ -353,132 +366,42 @@ static int
 }
 #endif    // FBINK_FOR_KOBO
 
-// Try to make sense out of the mess that are native Kobo rotations...
-// Vaguely inspired by Plato's implementation,
-// c.f., https://github.com/baskerville/plato/blob/f45c2da65bc556bc22d664b2f9450f95c550dbf5/src/device.rs#L265-L326
-// except not really, because that didn't work at all on my quirky devices ;).
-// See also rotate_touch_coordinates @ fbink.c for another attempt at this, which may or may not be worse ;p.
+// This tries to abstract the mess away by using a simple LUT for the rotation mapping,
+// which can then be paired with simple swap & invert flags for touch input translations,
+// much like what is done in KOReader or rmkit (c.f., utils/finger_trace.c for a practical example).
+// For other approaches, you can look at Plato:
+// https://github.com/baskerville/plato/blob/f45c2da65bc556bc22d664b2f9450f95c550dbf5/src/device.rs#L265-L326
+// See also rotate_touch_coordinates @ fbink.c for an earlier and gnarlier attempt at this.
+// And if you liked that one, you can look at the old implementations, which are archived in tools/rota_map.c ;).
 uint8_t
     fbink_rota_native_to_canonical(uint32_t rotate UNUSED_BY_NOTKOBO)
 {
 #if defined(FBINK_FOR_KOBO)
-	// NOTE: When we care about rotation at all,
-	//       kobo_sunxi_fb_fixup ensures that the rotate flag returned by fbink_get_state
-	//       is *already* canonical, so we don't have anything to do!
-	//       That said, since on those platforms, native_portrait == 0,
-	//       the whole logic below is still sound.
-	if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_SUNXI) {
-		return (uint8_t) rotate;
+	// Safety net for bogus input
+	if (rotate > FB_ROTATE_CCW) {
+		return ERANGE;
 	}
 
-	uint8_t rota = (uint8_t) rotate;
-
-	// First, we'll need to compute the native Portrait rotation
-	uint8_t native_portrait = FB_ROTATE_UR;
-	// NOTE: For *most* devices, Nickel's Portrait orientation should *always* match BootRota + 1
-	//       Thankfully, the Libra appears to be ushering in a new era filled with puppies and rainbows,
-	//       and, hopefully, less insane rotation quirks ;).
-	if (deviceQuirks.ntxRotaQuirk != NTX_ROTA_SANE) {
-		native_portrait = (deviceQuirks.ntxBootRota + 1) & 3;
-	} else {
-		native_portrait = deviceQuirks.ntxBootRota;
-	}
-
-	// Then, if the kernel happens to mangle rotations, we need to account for it, for *both* parties...
-	// In this direction, the second party is the input (native) rotation.
-	if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_ALL_INVERTED) {
-		// NOTE: This should cover the H2O and the few other devices suffering from the same quirk...
-		native_portrait ^= 2;
-		rotate ^= 2;
-	} else if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_ODD_INVERTED) {
-		// NOTE: This is for the Forma, which only inverts CW & CCW (i.e., odd numbers)...
-		if ((native_portrait & 0x01) == 1) {
-			native_portrait ^= 2;
-		}
-		if ((rotate & 0x01) == 1) {
-			rotate ^= 2;
-		}
-	}
-
-	// Now that we know what the canonical Portrait should look like in native-speak, we should be able to compute the rest...
-	if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_ALL_INVERTED) {
-		rota = (native_portrait - rotate) & 3;
-		// NOTE: If we do NOT invert anything, this works, too:
-		//       rota = (4 - (rotate - native_portrait)) & 3;
-	} else if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_CW_TOUCH || deviceQuirks.ntxRotaQuirk == NTX_ROTA_CCW_TOUCH) {
-		// NOTE: NTX_ROTA_CW_TOUCH was originally for the Libra 2,
-		//       whose Touch panel is mounted in the invert of the usual rotation (CW instead of CCW),
-		//       which makes for a native -> canonical mapping of "1 -> UR (0); 2 -> CCW (3); 3 -> UD (2); 0 -> CW (1)".
-		//       NTX_ROTA_CCW_TOUCH is for the Clara 2E (possibly because I got something wrong ^^).
-		rota = (native_portrait ^ rotate) & 3;
-	} else {
-		rota = (rotate - native_portrait) & 3;
-	}
-
-	return rota;
+	return deviceQuirks.rotationMap[rotate];
 #else
 	WARN("Rotation quirks are only handled on Kobo");
 	return ENOSYS;
 #endif
 }
 
-// NOTE: As far as NTX_ROTA_ALL_INVERTED is concerned, native->canonical == canonical->native ;).
-//       No, don't ask me to explain why: I don't know. Remember, I'm severely maths-impaired.
 uint32_t
     fbink_rota_canonical_to_native(uint8_t rotate UNUSED_BY_NOTKOBO)
 {
 #if defined(FBINK_FOR_KOBO)
-	// Same as above, nothing to do on those devices.
-	if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_SUNXI) {
-		return (uint32_t) rotate;
-	}
-
-	uint32_t rota = rotate;
-
-	// First, we'll need to compute the native Portrait rotation
-	uint8_t native_portrait = FB_ROTATE_UR;
-	// NOTE: For *most* devices, Nickel's Portrait orientation should *always* match BootRota + 1
-	//       Thankfully, the Libra appears to be ushering in a new era filled with puppies and rainbows,
-	//       and, hopefully, less insane rotation quirks ;).
-	if (deviceQuirks.ntxRotaQuirk != NTX_ROTA_SANE) {
-		native_portrait = (deviceQuirks.ntxBootRota + 1) & 3;
-	} else {
-		native_portrait = deviceQuirks.ntxBootRota;
-	}
-
-	// Then, if the kernel happens to mangle rotations, we need to account for it, for *both* parties...
-	if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_ALL_INVERTED) {
-		// NOTE: This should cover the H2O and the few other devices suffering from the same quirk...
-		native_portrait ^= 2;
-	} else if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_ODD_INVERTED) {
-		// NOTE: This is for the Forma, which only inverts CW & CCW (i.e., odd numbers)...
-		if ((native_portrait & 0x01) == 1) {
-			native_portrait ^= 2;
+	// This is a less common operation, so we don't actually keep a reverse LUT around.
+	for (uint8_t rota = FB_ROTATE_UR; rota <= FB_ROTATE_CCW; rota++) {
+		if (deviceQuirks.rotationMap[rota] == rotate) {
+			return rota;
 		}
 	}
 
-	// Now that we know what the canonical Portrait should look like in native-speak, we should be able to compute the rest...
-	if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_ALL_INVERTED) {
-		rota = (native_portrait - rotate) & 3;
-		// NOTE: If we do NOT invert native_portrait (but do invert the final result), this works, too:
-		//       rota = (4 - (native_portrait + rotate)) & 3;
-	} else if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_CW_TOUCH || deviceQuirks.ntxRotaQuirk == NTX_ROTA_CCW_TOUCH) {
-		// NOTE: native->canonical == canonical->native
-		rota = (native_portrait ^ rotate) & 3;
-	} else {
-		rota = (native_portrait + rotate) & 3;
-	}
-
-	// As mentioned earlier, we have to handle *both* parties, and in this direction, that's the final result.
-	if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_ALL_INVERTED) {
-		rota ^= 2;
-	} else if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_ODD_INVERTED) {
-		if ((rota & 0x01) == 1) {
-			rota ^= 2;
-		}
-	}
-
-	return rota;
+	// No match means input was out of range
+	return ERANGE;
 #else
 	WARN("Rotation quirks are only handled on Kobo");
 	return ENOSYS;
@@ -502,6 +425,35 @@ static orientation_t
 			// Should never happen.
 			return orientation_portrait;
 	}
+}
+#endif
+
+#if defined(FBINK_FOR_KOBO)
+static int
+    kobo_mtk_invert_fb(bool toggle)
+{
+	int fd = open("/proc/hwtcon/cmd", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+	if (fd == -1) {
+		PFWARN("Unable to open hwtcon/cmd procfs knob: %m");
+		return EXIT_FAILURE;
+	}
+
+	ssize_t wlen;
+	if (toggle) {
+		const unsigned char cmd[] = "night_mode 4";
+		wlen                      = write(fd, cmd, sizeof(cmd));
+	} else {
+		const unsigned char cmd[] = "night_mode 0";
+		wlen                      = write(fd, cmd, sizeof(cmd));
+	}
+	int rv = EXIT_SUCCESS;
+	if (wlen < 0) {
+		PFWARN("Failed to write to hwtcon/cmd procfs knob: %m");
+		rv = EXIT_FAILURE;
+	}
+
+	close(fd);
+	return rv;
 }
 #endif
 
@@ -589,6 +541,22 @@ int
 				} else {
 					grayscale = GRAYSCALE_8BIT;
 				}
+#if defined(FBINK_FOR_KINDLE)
+				// Handle CFA properly...
+				if (deviceQuirks.isKindleBellatrix4) {
+					if (vInfo.grayscale == GRAYSCALE_8BIT) {
+						grayscale = GRAYSCALE_8BIT_INVERTED;
+					} else if (vInfo.grayscale == GRAYSCALE_8BIT_INVERTED) {
+						grayscale = GRAYSCALE_8BIT;
+					} else if (vInfo.grayscale == GRAYSCALE_COLOR) {
+						grayscale = GRAYSCALE_COLOR_NIGHTMODE;
+					} else if (vInfo.grayscale == GRAYSCALE_COLOR_NIGHTMODE) {
+						grayscale = GRAYSCALE_COLOR;
+					} else {
+						grayscale = GRAYSCALE_8BIT;
+					}
+				}
+#endif
 			}
 			LOG("Updating grayscale value from %u to %hhu", vInfo.grayscale, grayscale);
 			new_vinfo.grayscale = (uint32_t) grayscale;
@@ -600,6 +568,32 @@ int
 		LOG("Sanitizing grayscale flag for bitdepths > 8bpp");
 		new_vinfo.grayscale = 0U;
 	}
+
+#if defined(FBINK_FOR_KOBO)
+	// On MTK, flip the `invert_fb` flag accordingly, as the driver doesn't do that for us.
+	// NOTE: So far, the driver itself doesn't seem to care all that much about the state of the grayscale flag itself,
+	//       so we're free to actually modify it like if we were on mxcfb.
+	//       That allows us to handle a toggle sanely, as we don't actually have a getter for the `invert_fb` flag...
+	if (deviceQuirks.isMTK && new_vinfo.grayscale != vInfo.grayscale) {
+		if (new_vinfo.grayscale == GRAYSCALE_8BIT_INVERTED) {
+			// Inverted grayscale, flip `invert_fb` to *on*
+			// NOTE: Technically, we could actually very much have it enabled at 16bpp or 32bpp,
+			//       but for simplicity's sake, we follow our usual "Y8 only" API.
+			if (kobo_mtk_invert_fb(true) == EXIT_SUCCESS) {
+				LOG("Enabled the MTK invert_fb flag");
+			}
+		} else {
+			// Color or standard grayscale, flip `invert_fb` to *off*
+			if (kobo_mtk_invert_fb(false) == EXIT_SUCCESS) {
+				LOG("Disabled the MTK invert_fb flag");
+			}
+		}
+	}
+#endif
+
+	// We'll want to confirm that a potential bitdepth switch took, as some drivers only support specific bitdepths.
+	// (e.g., except for the Clara 2E, MTK on Kobo no longer lets you switch to 8bpp, even on B&W devices...)
+	uint32_t expected_bpp = new_vinfo.bits_per_pixel;
 
 	if (rota == KEEP_CURRENT_ROTATE) {
 		LOG("Keeping current rotation: %u (%s)", vInfo.rotate, fb_rotate_to_string(vInfo.rotate));
@@ -643,6 +637,56 @@ int
 			LOG("Mangling rotate to %u (%s) to account for kernel rotation quirks",
 			    new_vinfo.rotate,
 			    fb_rotate_to_string(new_vinfo.rotate));
+		}
+	}
+
+	// On newer MTK devices, we first need to update the MDP src format to convince the fbdev driver to switch bitdepth...
+	// (c.f., comments around the bitdepth sanity check below for more details).
+	if (deviceQuirks.isMTK && deviceQuirks.deviceId != DEVICE_KOBO_ELIPSA_2E) {
+		LOG("Target device needs help to switch bitdepth...");
+		if (new_vinfo.bits_per_pixel == 8 || new_vinfo.bits_per_pixel == 32) {
+			// The current kernels only expose Y8, ARGB32 & ABGR32 in the gtMDP_SRC_FMTA array,
+			// despite mdp_src_format_write (and, supposedly, the rest of the driver) supporting RGB565...
+			// Since RGB565 is the worst, we won't make a fuss about that ;).
+
+			// Find the hwtcon folder in sysfs...
+			struct dirent** namelist = NULL;
+			int             n        = scandir("/sys/devices/platform", &namelist, is_hwtcon, alphasort);
+			if (n <= 0) {
+				PFLOG("scandir: %m");
+			} else {
+				for (int i = 0; i < n; i++) {
+					char sysfs_path[PATH_MAX] = { 0 };
+					snprintf(sysfs_path,
+						 sizeof(sysfs_path),
+						 "/sys/devices/platform/%s/mdp_src_format",
+						 namelist[i]->d_name);
+					free(namelist[i]);
+					LOG("...updating MDP source pixel format via `%s`", sysfs_path);
+
+					int sysfs_fd = open(sysfs_path, O_WRONLY | O_CLOEXEC);
+					if (sysfs_fd == -1) {
+						PFLOG("open(`%s`): %m", sysfs_path);
+					} else {
+						if (new_vinfo.bits_per_pixel == 8) {
+							const char px_fmt[] = "Y8";
+							if (write(sysfs_fd, px_fmt, sizeof(px_fmt)) < 0) {
+								PFLOG("mdp_src_format write: %m");
+							}
+						} else {
+							// NOTE: ARGB32 is also supported (i.e., BGRA32).
+							const char px_fmt[] = "ABGR32";
+							if (write(sysfs_fd, px_fmt, sizeof(px_fmt)) < 0) {
+								PFLOG("mdp_src_format write: %m");
+							}
+						}
+						close(sysfs_fd);
+					}
+				}
+				free(namelist);
+			}
+		} else {
+			LOG("...but the target bitdepth is unsupported, we'll fail gracefully");
 		}
 	}
 #endif
@@ -728,6 +772,46 @@ int
 		    expected_rota);
 	}
 #endif
+
+	// Warn if the driver refused to change bitdepth
+	// NOTE: On MTK, hwtcon_fb_check_var, which calls hwtcon_fb_check_rotate,
+	//       stomps on the live bits_per_pixel field based on hwtcon_device_info()->color_format,
+	//       which defaults to ARGB32 (via hwtcon_driver_init_device_info @ hwtcon_driver.c)...
+	//       You need to change mdp_src_format (which defaults to ABGR32 on newer devices) via its sysfs entry,
+	//       because mdp_src_format_write will then update color_format (and the fb pixel format) accordingly...
+	//       e.g., echo Y8 > /sys/devices/platform/14000000.hwtcon/mdp_src_format
+	// NOTE: Unfortunately, that fun interaction doesn't appear to be supported on the Elipsa 2E,
+	//       but on newer affected devices, we implement that right before the FBIOPUT_VSCREENINFO ioctl.
+	if (new_vinfo.bits_per_pixel != expected_bpp) {
+		LOG("Current bitdepth (%ubpp) doesn't match the expected bitdepth (%ubpp). It might be unsupported by the driver?",
+		    new_vinfo.bits_per_pixel,
+		    expected_bpp);
+
+		if (new_vinfo.grayscale != vInfo.grayscale) {
+			LOG("Restoring the original grayscale flag");
+			new_vinfo.grayscale = vInfo.grayscale;
+			if (ioctl(fbfd, FBIOPUT_VSCREENINFO, &new_vinfo)) {
+				PFWARN("FBIOPUT_VSCREENINFO: %m");
+				rv = ERRCODE(ECANCELED);
+				goto cleanup;
+			}
+
+#if defined(FBINK_FOR_KOBO)
+			// Attempt to restore a meaningful invert status, too...
+			if (deviceQuirks.isMTK) {
+				if (new_vinfo.grayscale == GRAYSCALE_8BIT_INVERTED) {
+					if (kobo_mtk_invert_fb(true) == EXIT_SUCCESS) {
+						LOG("Enabled the MTK invert_fb flag");
+					}
+				} else {
+					if (kobo_mtk_invert_fb(false) == EXIT_SUCCESS) {
+						LOG("Disabled the MTK invert_fb flag");
+					}
+				}
+			}
+#endif
+		}
+	}
 
 #ifdef FBINK_FOR_KINDLE
 	// And, again, einkfb is a special snowflake...

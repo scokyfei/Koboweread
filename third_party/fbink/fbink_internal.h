@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -61,6 +61,9 @@
 #			define FBINK_WITH_BUTTON_SCAN
 #		endif
 #	endif
+#	ifndef FBINK_WITH_INPUT
+#		define FBINK_WITH_INPUT
+#	endif
 #endif
 // Bundling Unifont, on the other hand, is *always* optional.
 
@@ -73,9 +76,11 @@
 //       GCC should mostly have handled this right on its own, we're just giving it a nudge ;).
 //       The original idea was to see if we could actually completely avoid libm, but we really can't since,
 //       if need be, GCC builtins *may* emit library calls. Which is the case here ;).
-#ifdef FBINK_WITH_OPENTYPE
+#if defined(FBINK_WITH_OPENTYPE) || defined(FBINK_WITH_IMAGE)
 // Since we can't avoid libm, include the standard header, so everyones gets the right declarations
 #	include <math.h>
+#endif
+#ifdef FBINK_WITH_OPENTYPE
 #	ifdef __clang__
 #		if __has_builtin(__builtin_ceilf)
 #			define iceilf(x)      ((int) (__builtin_ceilf(x)))
@@ -128,8 +133,14 @@
 #endif
 
 // Likely/Unlikely branch tagging
-#define likely(x)   __builtin_expect(!!(x), 1)
-#define unlikely(x) __builtin_expect(!!(x), 0)
+#if defined(__cplusplus)
+// c.f., https://stackoverflow.com/a/43870188/1067003
+#	define likely(x)   __builtin_expect(static_cast<bool>((x)), 1)
+#	define unlikely(x) __builtin_expect(static_cast<bool>((x)), 0)
+#else
+#	define likely(x)   __builtin_expect(!!(x), 1)
+#	define unlikely(x) __builtin_expect(!!(x), 0)
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -204,6 +215,7 @@
 #	include "eink/mxcfb-kobo.h"
 #	include "eink/ion-kobo.h"
 #	include "eink/sunxi-kobo.h"
+#	include "eink/mtk-kobo.h"
 #elif defined(FBINK_FOR_REMARKABLE)
 #	include "eink/mxcfb-remarkable.h"
 #elif defined(FBINK_FOR_POCKETBOOK)
@@ -280,32 +292,7 @@
 
 // Fallback version tag...
 #ifndef FBINK_VERSION
-#	define FBINK_FALLBACK_VERSION "v1.25.0-git"
-#	ifdef FBINK_FOR_KINDLE
-#		define FBINK_VERSION FBINK_FALLBACK_VERSION " for Kindle"
-#	else
-#		ifdef FBINK_FOR_CERVANTES
-#			define FBINK_VERSION FBINK_FALLBACK_VERSION " for Cervantes"
-#		else
-#			ifdef FBINK_FOR_REMARKABLE
-#				define FBINK_VERSION FBINK_FALLBACK_VERSION " for reMarkable"
-#			else
-#				ifdef FBINK_FOR_POCKETBOOK
-#					define FBINK_VERSION FBINK_FALLBACK_VERSION " for PocketBook"
-#				else
-#					ifdef FBINK_FOR_LINUX
-#						define FBINK_VERSION FBINK_FALLBACK_VERSION " for Linux"
-#					else
-#						ifdef FBINK_FOR_KOBO
-#							define FBINK_VERSION FBINK_FALLBACK_VERSION " for Kobo"
-#						else
-#							define FBINK_VERSION FBINK_FALLBACK_VERSION
-#						endif
-#					endif
-#				endif
-#			endif
-#		endif
-#	endif
+#	define FBINK_VERSION "v1.25.0-git"
 #endif
 
 // MIN/MAX with no side-effects,
@@ -329,14 +316,40 @@
 // c.f., <linux/kernel.h>
 #define ALIGN(x, a)                                                                                                      \
 	({                                                                                                               \
-		__auto_type mask__ = (a) -1U;                                                                            \
+		__auto_type mask__ = (a) - 1U;                                                                           \
 		(((x) + (mask__)) & ~(mask__));                                                                          \
 	})
 #define IS_ALIGNED(x, a)                                                                                                 \
 	({                                                                                                               \
-		__auto_type mask__ = (a) -1U;                                                                            \
+		__auto_type mask__ = (a) - 1U;                                                                           \
 		((x) & (mask__)) == 0 ? true : false;                                                                    \
 	})
+
+// Fancy ARRAY_SIZE macro, as found in the Linux kernel
+// c.f., http://zubplot.blogspot.com/2015/01/gcc-is-wonderful-better-arraysize-macro.html
+#if defined(__GNUC__) && defined(__GNUC_MINOR__)
+#	define GNUC_VERSION          (__GNUC__ << 16) + __GNUC_MINOR__
+#	define GNUC_PREREQ(maj, min) (GNUC_VERSION >= ((maj) << 16) + (min))
+#else
+#	define GNUC_PREREQ(maj, min) 0
+#endif
+
+#define BUILD_BUG_ON_ZERO(e) (sizeof(struct { int : -!!(e) * 1234; }))
+
+#if GNUC_PREREQ(3, 1)
+#	define SAME_TYPE(a, b)  __builtin_types_compatible_p(typeof(a), typeof(b))
+#	define MUST_BE_ARRAY(a) BUILD_BUG_ON_ZERO(SAME_TYPE((a), &(*a)))
+#else
+#	define MUST_BE_ARRAY(a) BUILD_BUG_ON_ZERO(sizeof(a) % sizeof(*a))
+#endif
+
+#ifdef __cplusplus
+template<typename T, size_t N>
+char (&ARRAY_SIZE_HELPER(T (&array)[N]))[N];
+#	define ARRAY_SIZE(array) (sizeof(ARRAY_SIZE_HELPER(array)))
+#else
+#	define ARRAY_SIZE(a) ((sizeof(a) / sizeof(*a)) + MUST_BE_ARRAY(a))
+#endif
 
 // NOTE: Some of our ifdef combinations may cause a small number of function arguments to become unused...
 //       Handle the warnings in these cases with a bit of trickery,
@@ -366,6 +379,11 @@
 #	define UNUSED_BY_NOBUTTON __attribute__((unused))
 #else
 #	define UNUSED_BY_NOBUTTON
+#endif
+#ifndef FBINK_WITH_INPUT
+#	define UNUSED_BY_NOINPUT __attribute__((unused))
+#else
+#	define UNUSED_BY_NOINPUT
 #endif
 #ifdef FBINK_FOR_KINDLE
 #	define UNUSED_BY_NOTKINDLE
@@ -422,6 +440,9 @@
 		}                                                                                                        \
 	})
 
+// Same, but with __PRETTY_FUNCTION__ right before fmt
+#define PFLOG(fmt, ...) ({ LOG("[%s] " fmt, __PRETTY_FUNCTION__, ##__VA_ARGS__); })
+
 // And then what we send to stderr (mostly fbink_init stuff, add an FBInk tag to make it clear where it comes from for API users)
 #define ELOG(fmt, ...)                                                                                                   \
 	({                                                                                                               \
@@ -433,6 +454,9 @@
 			}                                                                                                \
 		}                                                                                                        \
 	})
+
+// Same, but with __PRETTY_FUNCTION__ right before fmt
+#define PFELOG(fmt, ...) ({ ELOG("[%s] " fmt, __PRETTY_FUNCTION__, ##__VA_ARGS__); })
 
 // And a simple wrapper for actual warnings on error codepaths. Should only be used for warnings before a return/exit.
 // Always shown, always tagged, and always ends with a bang.
@@ -475,7 +499,7 @@ FBInkKoboSunxi sunxiCtx = {
 	.ion_fd       = -1,
 	.alloc_size   = 0U,
 	.ion          = { .handle = 0, .fd = -1 },
-	.layer        = { { 0 } },
+	.layer        = {},
 	.rota         = 0U,
 	.force_rota   = FORCE_ROTA_GYRO,
 	.has_fbdamage = false
@@ -540,6 +564,11 @@ const uint32_t* (*fxpFont32xGetBitmap)(uint32_t) = NULL;
 //const uint64_t* (*fxpFont64xGetBitmap)(uint32_t) = NULL;
 #endif
 
+#ifdef FBINK_FOR_KOBO
+// And the epdc wakeup one...
+int (*fxpWakeupEpdc)(void) = NULL;
+#endif
+
 // Where we track device/screen-specific quirks
 FBInkDeviceQuirks deviceQuirks = { 0 };
 
@@ -563,13 +592,19 @@ static void rotate_touch_coordinates(FBInkCoordinates* restrict);
 #endif
 static void rotate_coordinates_nop(FBInkCoordinates* restrict __attribute__((unused)));
 
-// NOTE: Making sure all of those are inlined helps fbink_print_ot (c.f., #43).
+// NOTE: Making sure most of those are inlined helps fbink_print_ot (c.f., #43).
 #ifdef FBINK_WITH_DRAW
-static inline __attribute__((always_inline, hot)) uint16_t pack_rgb565(uint8_t, uint8_t, uint8_t);
+static inline __attribute__((const, always_inline, hot)) uint16_t pack_bgr565(uint8_t, uint8_t, uint8_t);
+static inline __attribute__((const, always_inline, hot)) uint16_t pack_rgb565(uint8_t, uint8_t, uint8_t);
+
+static __attribute__((pure)) FBInkPixel pack_pixel_from_rgba(uint8_t, uint8_t, uint8_t, uint8_t);
+static __attribute__((pure)) FBInkPixel pack_pixel_from_y8(uint8_t);
 
 static inline __attribute__((always_inline, hot)) void put_pixel_Gray4(const FBInkCoordinates* restrict,
 								       const FBInkPixel* restrict);
 static inline __attribute__((always_inline, hot)) void put_pixel_Gray8(const FBInkCoordinates* restrict,
+								       const FBInkPixel* restrict);
+static inline __attribute__((always_inline)) void      put_pixel_BGR24(const FBInkCoordinates* restrict,
 								       const FBInkPixel* restrict);
 static inline __attribute__((always_inline)) void      put_pixel_RGB24(const FBInkCoordinates* restrict,
 								       const FBInkPixel* restrict);
@@ -587,9 +622,12 @@ static inline __attribute__((always_inline, hot)) void get_pixel_Gray4(const FBI
 								       FBInkPixel* restrict);
 static inline __attribute__((always_inline, hot)) void get_pixel_Gray8(const FBInkCoordinates* restrict,
 								       FBInkPixel* restrict);
+static inline __attribute__((always_inline)) void get_pixel_BGR24(const FBInkCoordinates* restrict, FBInkPixel* restrict);
 static inline __attribute__((always_inline)) void get_pixel_RGB24(const FBInkCoordinates* restrict, FBInkPixel* restrict);
 static inline __attribute__((always_inline, hot)) void get_pixel_RGB32(const FBInkCoordinates* restrict,
 								       FBInkPixel* restrict);
+static inline __attribute__((always_inline, hot)) void get_pixel_BGR565(const FBInkCoordinates* restrict,
+									FBInkPixel* restrict);
 static inline __attribute__((always_inline, hot)) void get_pixel_RGB565(const FBInkCoordinates* restrict,
 									FBInkPixel* restrict);
 // NOTE: Same as put_pixel ;)
@@ -671,7 +709,7 @@ static __attribute__((hot)) void fill_rect_RGB32_checked(unsigned short int,
 							 unsigned short int,
 							 unsigned short int,
 							 const FBInkPixel* restrict);
-static void                      clear_screen(int UNUSED_BY_NOTKINDLE, uint8_t, bool UNUSED_BY_NOTKINDLE);
+static void                      clear_screen(int UNUSED_BY_NOTKINDLE, FBInkPixel*, bool UNUSED_BY_NOTKINDLE);
 //static void checkerboard_screen(void);
 #endif    // FBINK_WITH_DRAW
 
@@ -679,7 +717,7 @@ static void                      clear_screen(int UNUSED_BY_NOTKINDLE, uint8_t, 
 static const unsigned char* font8x8_get_bitmap(uint32_t);
 #endif
 
-static __attribute__((cold)) const char* fontname_to_string(uint8_t);
+static __attribute__((cold)) const char* fontname_to_string(FONT_INDEX_E);
 
 #ifdef FBINK_WITH_BITMAP
 static int zu_print_length(size_t);
@@ -719,16 +757,25 @@ static int refresh_kobo_mk7(int, const struct mxcfb_rect, const FBInkConfig*);
 static int wait_for_complete_kobo_mk7(int, uint32_t);
 static int refresh_kobo_sunxi(const struct mxcfb_rect, const FBInkConfig*);
 static int wait_for_complete_kobo_sunxi(uint32_t);
+static int refresh_kobo_mtk(int, const struct mxcfb_rect, const FBInkConfig*);
+static int wait_for_submission_kobo_mtk(int, uint32_t);
+static int wait_for_complete_kobo_mtk(int, uint32_t);
 #	endif    // FBINK_FOR_KINDLE
 static inline void compute_update_marker(void);
 #endif    // !FBINK_FOR_LINUX
 static int refresh_compat(int, const struct mxcfb_rect, bool, const FBInkConfig*);
 static int refresh(int, const struct mxcfb_rect, const FBInkConfig*);
-#ifndef FBINK_FOR_LINUX
-#	if defined(FBINK_FOR_KINDLE)
+#if defined(FBINK_FOR_KINDLE) || defined(FBINK_FOR_KOBO)
 static int wait_for_submission(int, uint32_t);
-#	endif
+#endif
+#ifndef FBINK_FOR_LINUX
 static int wait_for_complete(int, uint32_t);
+#endif
+#ifdef FBINK_FOR_KOBO
+#	define NTX_NXP_EPDC_POWER "/sys/class/graphics/fb0/power_state"
+static int wakeup_epdc_kobo_nxp(void);
+static int wakeup_epdc_kobo_sunxi(void);
+static int wakeup_epdc_kobo_mtk(void);
 #endif
 
 static inline __attribute__((always_inline)) const char* get_fbdev_path(void);
@@ -736,6 +783,7 @@ static int                                               open_fb_fd(int* restric
 static int                                               open_fb_fd_nonblock(int* restrict, bool* restrict);
 
 static __attribute__((cold)) const char* fb_rotate_to_string(uint32_t);
+static __attribute__((cold)) const char* fb_pixfmt_to_string(FBINK_PXFMT_INDEX_E);
 #ifdef FBINK_FOR_KINDLE
 static __attribute__((cold)) const char* einkfb_orientation_to_string(orientation_t);
 #endif
@@ -749,7 +797,7 @@ static __attribute__((cold)) void pocketbook_fix_fb_info(void);
 #endif
 #ifdef FBINK_FOR_KOBO
 static __attribute__((cold)) void        kobo_sunxi_fb_fixup(bool);
-static __attribute__((cold)) const char* sunxi_force_rota_to_string(SUNXI_FORCE_ROTA_INDEX_T);
+static __attribute__((cold)) const char* sunxi_force_rota_to_string(SUNXI_FORCE_ROTA_INDEX_E);
 #endif
 static __attribute__((cold)) int initialize_fbink(int, const FBInkConfig* restrict, bool);
 
@@ -773,6 +821,10 @@ static void rotate_region_boot(struct mxcfb_rect* restrict);
 static void rotate_region_nop(struct mxcfb_rect* restrict);
 static void fullscreen_region(struct mxcfb_rect* restrict);
 
+#ifdef FBINK_WITH_DRAW
+static int fill_rect(int, const FBInkConfig* restrict, const FBInkRect* restrict, const FBInkPixel* restrict, bool);
+#endif
+
 static int grid_to_region(int, unsigned short int, unsigned short int, bool, const FBInkConfig* restrict);
 
 static void set_last_rect(const struct mxcfb_rect* restrict);
@@ -788,6 +840,8 @@ unsigned char*
 static unsigned char*               img_load_from_file(const char*, int* restrict, int* restrict, int* restrict, int);
 static unsigned char*               img_convert_px_format(const unsigned char* restrict, int, int, int, int);
 static __attribute__((hot)) uint8_t dither_o8x8(unsigned short int, unsigned short int, uint8_t);
+static uint8_t                      hhuclampf(float d, float min, float max);
+static __attribute__((hot)) void    saturation_boost_hsp(FBInkPixelRGBA* restrict px, const float);
 static int                          draw_image(int,
 					       const unsigned char* restrict,
 					       const int,
@@ -800,17 +854,17 @@ static int                          draw_image(int,
 #endif
 
 #ifdef FBINK_WITH_OPENTYPE
-static __attribute__((cold)) const char* font_style_to_string(FONT_STYLE_T);
+static __attribute__((cold)) const char* font_style_to_string(FONT_STYLE_E);
 static __attribute__((cold)) int         add_ot_font(const char*, FONT_STYLE_T, FBInkOTFonts* restrict);
 static __attribute__((cold)) int         free_ot_font(stbtt_fontinfo** restrict);
 static __attribute__((cold)) int         free_ot_fonts(FBInkOTFonts* restrict);
 static void                              parse_simple_md(const char* restrict, size_t, unsigned char* restrict);
-static __attribute__((cold)) const char* glyph_style_to_string(CHARACTER_FONT_T);
+static __attribute__((cold)) const char* glyph_style_to_string(CHARACTER_FONT_E);
 #endif
 
 #ifndef FBINK_FOR_LINUX
 static uint32_t                          get_wfm_mode(WFM_MODE_INDEX_T);
-static __attribute__((cold)) const char* wfm_to_string(WFM_MODE_INDEX_T);
+static __attribute__((cold)) const char* wfm_to_string(WFM_MODE_INDEX_E);
 #	ifdef FBINK_FOR_KINDLE
 static __attribute__((cold)) const char* kindle_wfm_to_string(uint32_t);
 static __attribute__((cold)) const char* kindle_zelda_wfm_to_string(uint32_t);
@@ -825,8 +879,8 @@ static __attribute__((cold)) const char* remarkable_wfm_to_string(uint32_t);
 static __attribute__((cold)) const char* pocketbook_wfm_to_string(uint32_t);
 #	endif
 #	if defined(FBINK_FOR_KOBO) || defined(FBINK_FOR_KINDLE)
-static int                               get_hwd_mode(HW_DITHER_INDEX_T);
-static __attribute__((cold)) const char* hwd_to_string(HW_DITHER_INDEX_T);
+static int                               get_hwd_mode(HW_DITHER_INDEX_E);
+static __attribute__((cold)) const char* hwd_to_string(HW_DITHER_INDEX_E);
 #	endif
 #endif
 
@@ -846,6 +900,11 @@ static int dump_region(struct mxcfb_rect* region, FBInkDump* restrict dump);
 // For the I²C stuff, which we need on Kobo (at least on Mk. 8 ;))
 #ifdef FBINK_FOR_KOBO
 #	include "fbink_rota_quirks.h"
+#endif
+
+// String utilities, to avoid using strncpy (c.f., string_copying(7)).
+#if defined(FBINK_WITH_INPUT) || !defined(FBINK_FOR_LINUX)
+#	include "fbink_string_utils.h"
 #endif
 
 #endif

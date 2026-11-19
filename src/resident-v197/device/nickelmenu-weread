@@ -1,0 +1,6 @@
+# NickelMenu entry (Koboweread-Colour): copy to /mnt/onboard/.adds/nm/weread.
+# Starts KOReader with a one-shot request; the WeRead plugin then opens the
+# Android launcher (and WeRead) once KOReader is online.
+# The label is in traditional characters: with an English UI, Nickel falls
+# back to Japanese fonts, which lack the simplified 读/书 (shown as boxes).
+menu_item:main:微信讀書:cmd_spawn:quiet:touch /tmp/wereadkobo-autostart && exec /mnt/onboard/.adds/koreader/koreader.sh

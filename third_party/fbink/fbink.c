@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -58,18 +58,18 @@
 // Prevent attempting to decode ginormous images
 #	define STBI_MAX_DIMENSIONS (1 << 13)
 // Disable a bunch of very verbose but mostly harmless warnings
-#	pragma GCC diagnostic   push
-#	pragma GCC diagnostic   ignored "-Wunknown-pragmas"
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #	pragma clang diagnostic ignored "-Wunknown-warning-option"
-#	pragma GCC diagnostic   ignored "-Wcast-qual"
-#	pragma GCC diagnostic   ignored "-Wcast-align"
-#	pragma GCC diagnostic   ignored "-Wconversion"
-#	pragma GCC diagnostic   ignored "-Wsign-conversion"
-#	pragma GCC diagnostic   ignored "-Wduplicated-branches"
-#	pragma GCC diagnostic   ignored "-Wunused-function"
-#	pragma GCC diagnostic   ignored "-Wsign-compare"
-#	pragma GCC diagnostic   ignored "-Wunused-but-set-variable"
-#	pragma GCC diagnostic   ignored "-Wsuggest-attribute=pure"
+#	pragma GCC diagnostic ignored "-Wcast-qual"
+#	pragma GCC diagnostic ignored "-Wcast-align"
+#	pragma GCC diagnostic ignored "-Wconversion"
+#	pragma GCC diagnostic ignored "-Wsign-conversion"
+#	pragma GCC diagnostic ignored "-Wduplicated-branches"
+#	pragma GCC diagnostic ignored "-Wunused-function"
+#	pragma GCC diagnostic ignored "-Wsign-compare"
+#	pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#	pragma GCC diagnostic ignored "-Wsuggest-attribute=pure"
 #	include "stb/stb_image.h"
 #	pragma GCC diagnostic pop
 #endif
@@ -79,14 +79,14 @@
 // Make it private, we don't need it anywhere else
 #	define STBTT_STATIC
 // stb_truetype is.... noisy
-#	pragma GCC diagnostic   push
-#	pragma GCC diagnostic   ignored "-Wunknown-pragmas"
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #	pragma clang diagnostic ignored "-Wunknown-warning-option"
-#	pragma GCC diagnostic   ignored "-Wcast-qual"
-#	pragma GCC diagnostic   ignored "-Wconversion"
-#	pragma GCC diagnostic   ignored "-Wsign-conversion"
-#	pragma GCC diagnostic   ignored "-Wunused-function"
-#	pragma GCC diagnostic   ignored "-Wsuggest-attribute=pure"
+#	pragma GCC diagnostic ignored "-Wcast-qual"
+#	pragma GCC diagnostic ignored "-Wconversion"
+#	pragma GCC diagnostic ignored "-Wsign-conversion"
+#	pragma GCC diagnostic ignored "-Wunused-function"
+#	pragma GCC diagnostic ignored "-Wsuggest-attribute=pure"
 #	include "stb/stb_truetype.h"
 #	pragma GCC diagnostic pop
 #endif
@@ -98,14 +98,153 @@ const char*
 	return FBINK_VERSION;
 }
 
+// Return the target platform of the current library build
+FBINK_TARGET_T
+fbink_target(void)
+{
+#if defined(FBINK_FOR_LINUX)
+	return FBINK_TARGET_LINUX;
+#elif defined(FBINK_FOR_KOBO)
+	return FBINK_TARGET_KOBO;
+#elif defined(FBINK_FOR_KINDLE)
+	return FBINK_TARGET_KINDLE;
+#elif defined(FBINK_FOR_LEGACY)
+	return FBINK_TARGET_KINDLE_LEGACY;
+#elif defined(FBINK_FOR_CERVANTES)
+	return FBINK_TARGET_CERVANTES;
+#elif defined(FBINK_FOR_REMARKABLE)
+	return FBINK_TARGET_REMARKABLE;
+#elif defined(FBINK_FOR_POCKETBOOK)
+	return FBINK_TARGET_POCKETBOOK;
+#else
+	// Unreachable
+	return FBINK_TARGET_MAX;
+#endif
+}
+
+// Return the feature set of the current library build
+uint32_t
+    fbink_features(void)
+{
+#ifndef FBINK_MINIMAL
+	uint32_t features = FBINK_FEATURE_FULL;
+#else
+	uint32_t features = FBINK_FEATURE_MINIMAL;
+#	ifdef FBINK_WITH_DRAW
+	features |= FBINK_FEATURE_DRAW;
+#	endif
+#	ifdef FBINK_WITH_BITMAP
+	features |= FBINK_FEATURE_BITMAP;
+#	endif
+#	ifdef FBINK_WITH_FONTS
+	features |= FBINK_FEATURE_FONTS;
+#	endif
+#	ifdef FBINK_WITH_UNIFONT
+	features |= FBINK_FEATURE_UNIFONT;
+#	endif
+#	ifdef FBINK_WITH_OPENTYPE
+	features |= FBINK_FEATURE_OPENTYPE;
+#	endif
+#	ifdef FBINK_WITH_IMAGE
+	features |= FBINK_FEATURE_IMAGE;
+#	endif
+#	ifdef FBINK_WITH_BUTTON_SCAN
+	features |= FBINK_FEATURE_BUTTON_SCAN;
+#	endif
+#	ifdef FBINK_WITH_INPUT
+	features |= FBINK_FEATURE_INPUT;
+#	endif
+#endif    // !FBINK_MINIMAL
+	return features;
+}
+
 #ifdef FBINK_WITH_DRAW
-// #RGB -> RGB565
-static inline __attribute__((always_inline, hot)) uint16_t
-    pack_rgb565(uint8_t r, uint8_t g, uint8_t b)
+// #RGB -> BGR565
+static inline __attribute__((const, always_inline, hot)) uint16_t
+    pack_bgr565(uint8_t r, uint8_t g, uint8_t b)
 {
 	// ((r / 8) * 2048) + ((g / 4) * 32) + (b / 8);
 	return (uint16_t) (((r >> 3U) << 11U) | ((g >> 2U) << 5U) | (b >> 3U));
 }
+
+// #RGB -> RGB565
+static inline __attribute__((const, always_inline, hot)) uint16_t
+    pack_rgb565(uint8_t r, uint8_t g, uint8_t b)
+{
+	// ((b / 8) * 2048) + ((g / 4) * 32) + (r / 8);
+	return (uint16_t) (((b >> 3U) << 11U) | ((g >> 2U) << 5U) | (r >> 3U));
+}
+
+#	ifdef FBINK_WITH_DRAW
+// Pack an FBInkPixel accordingly for the target pixel format
+static __attribute__((pure)) FBInkPixel
+    pack_pixel_from_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+	FBInkPixel px;
+	switch (deviceQuirks.pixelFormat) {
+		case FBINK_PXFMT_Y4:
+		case FBINK_PXFMT_Y8:
+			// NOTE: We inline stbi__compute_y to avoid needing to depend on FBINK_WITH_IMAGE
+			px.gray8 = (uint8_t) (((r * 77U) + (g * 150U) + (29U * b)) >> 8U);
+			break;
+		case FBINK_PXFMT_BGR565:
+			px.rgb565 = pack_bgr565(r, g, b);
+			break;
+		case FBINK_PXFMT_RGB565:
+			px.rgb565 = pack_rgb565(r, g, b);
+			break;
+		case FBINK_PXFMT_BGR24:
+		case FBINK_PXFMT_BGRA:
+		case FBINK_PXFMT_BGR32:
+		default:
+			px.bgra.color.b = b;
+			px.bgra.color.g = g;
+			px.bgra.color.r = r;
+			px.bgra.color.a = a;
+			break;
+		case FBINK_PXFMT_RGB24:
+		case FBINK_PXFMT_RGBA:
+		case FBINK_PXFMT_RGB32:
+			px.rgba.color.r = r;
+			px.rgba.color.g = g;
+			px.rgba.color.b = b;
+			px.rgba.color.a = a;
+			break;
+	}
+
+	return px;
+}
+
+static __attribute__((pure)) FBInkPixel
+    pack_pixel_from_y8(uint8_t v)
+{
+	FBInkPixel px;
+	switch (deviceQuirks.pixelFormat) {
+		case FBINK_PXFMT_Y4:
+		case FBINK_PXFMT_Y8:
+			px.gray8 = v;
+			break;
+		case FBINK_PXFMT_BGR565:
+		case FBINK_PXFMT_RGB565:
+			px.rgb565 = pack_rgb565(v, v, v);
+			break;
+		case FBINK_PXFMT_BGR24:
+		case FBINK_PXFMT_BGRA:
+		case FBINK_PXFMT_BGR32:
+		case FBINK_PXFMT_RGB24:
+		case FBINK_PXFMT_RGBA:
+		case FBINK_PXFMT_RGB32:
+		default:
+			px.bgra.color.b = v;
+			px.bgra.color.g = v;
+			px.bgra.color.r = v;
+			px.bgra.color.a = 0xFFu;
+			break;
+	}
+
+	return px;
+}
+#	endif    // FBINK_WITH_DRAW
 
 // Helper functions to 'plot' a specific pixel in a given color to the framebuffer
 static inline __attribute__((always_inline, hot)) void
@@ -147,6 +286,25 @@ static inline __attribute__((always_inline, hot)) void
 }
 
 static inline __attribute__((always_inline)) void
+    put_pixel_BGR24(const FBInkCoordinates* restrict coords, const FBInkPixel* restrict px)
+{
+	// calculate the pixel's byte offset inside the buffer
+	// note: x * 3 as every pixel is 3 consecutive bytes
+	const size_t pix_offset = (coords->x * 3U) + (coords->y * fInfo.line_length);
+
+	// now this is about the same as 'fbp[pix_offset] = value'
+	// NOTE: Technically legitimate warning. In practice, we always pass RGB32 pixels in 24bpp codepaths.
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#	pragma clang diagnostic ignored "-Wunknown-warning-option"
+#	pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+	*((unsigned char*) (fbPtr + pix_offset))      = px->bgra.color.b;
+	*((unsigned char*) (fbPtr + pix_offset + 1U)) = px->bgra.color.g;
+	*((unsigned char*) (fbPtr + pix_offset + 2U)) = px->bgra.color.r;
+#	pragma GCC diagnostic pop
+}
+
+static inline __attribute__((always_inline)) void
     put_pixel_RGB24(const FBInkCoordinates* restrict coords, const FBInkPixel* restrict px)
 {
 	// calculate the pixel's byte offset inside the buffer
@@ -155,13 +313,13 @@ static inline __attribute__((always_inline)) void
 
 	// now this is about the same as 'fbp[pix_offset] = value'
 	// NOTE: Technically legitimate warning. In practice, we always pass RGB32 pixels in 24bpp codepaths.
-#	pragma GCC diagnostic   push
-#	pragma GCC diagnostic   ignored "-Wunknown-pragmas"
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #	pragma clang diagnostic ignored "-Wunknown-warning-option"
-#	pragma GCC diagnostic   ignored "-Wmaybe-uninitialized"
-	*((unsigned char*) (fbPtr + pix_offset))      = px->bgra.color.b;
-	*((unsigned char*) (fbPtr + pix_offset + 1U)) = px->bgra.color.g;
-	*((unsigned char*) (fbPtr + pix_offset + 2U)) = px->bgra.color.r;
+#	pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+	*((unsigned char*) (fbPtr + pix_offset))      = px->rgba.color.r;
+	*((unsigned char*) (fbPtr + pix_offset + 1U)) = px->rgba.color.g;
+	*((unsigned char*) (fbPtr + pix_offset + 2U)) = px->rgba.color.b;
 #	pragma GCC diagnostic pop
 }
 
@@ -177,7 +335,7 @@ static inline __attribute__((always_inline, hot)) void
 	//       which is exactly what we want ;).
 #	pragma GCC diagnostic push
 #	pragma GCC diagnostic ignored "-Wcast-align"
-	*((uint32_t*) (fbPtr + scanline_offset) + coords->x) = px->bgra.p;
+	*((uint32_t*) (fbPtr + scanline_offset) + coords->x) = px->p;
 #	pragma GCC diagnostic pop
 }
 
@@ -188,7 +346,7 @@ static inline __attribute__((always_inline, hot)) void
 	const size_t scanline_offset = (size_t) coords->y * fInfo.line_length;
 
 	// write the two bytes at once, much to GCC's dismay...
-	// NOTE: Input pixel *has* to be properly packed to RGB565 first (via pack_rgb565, c.f., put_pixel)!
+	// NOTE: Input pixel *has* to be properly packed to BGR565/RGB565 first (via pack_bgr565/pack_rgb565, c.f., put_pixel)!
 #	pragma GCC diagnostic push
 #	pragma GCC diagnostic ignored "-Wcast-align"
 	*((uint16_t*) (fbPtr + scanline_offset) + coords->x) = px->rgb565;
@@ -270,8 +428,9 @@ static void
 }
 
 #	ifdef FBINK_WITH_BUTTON_SCAN
-// NOTE: c.f., https://github.com/llandsmeer/inkvt/pull/14 for another attempt at this...
-//             (Which means, to a certain extent, fbink_rota_quirks.c)
+// NOTE: Do *not* trust this to do the right thing, see utils/finger_trace.c instead!
+//       This is basically left as-is for archeological purposes only,
+//       the only caller is in button_scan, which was kind of a crazy experiment to begin with ;).
 static void
     rotate_touch_coordinates(FBInkCoordinates* restrict coords)
 {
@@ -297,7 +456,8 @@ static void
 		// On *some* devices with a 6.8" panel, *every* orientation is inverted...
 		rotation ^= 2U;
 	} else if (deviceQuirks.ntxRotaQuirk == NTX_ROTA_SANE) {
-		// TODO: This is for the Libra, double-check that it holds up...
+		// NOTE: This is for the Libra, but I don't have access to that device to double-check...
+		//       And I probably never will, see the deprecation comment above this function ;).
 		// The reasoning being to try to match the Forma's behavior:
 		// UR -> 3 ^ 2 -> CW / CW -> 2 -> UD / UD -> 1 ^ 2 -> CCW / CCW -> 0 -> UR
 		// The format being: *effective* orientation (i.e., user-facing) -> actual fb rotate value -> input transform
@@ -414,9 +574,9 @@ static inline __attribute__((always_inline, hot)) void
 	}
 
 	// NOTE: Hmm, here, an if ladder appears to be ever so *slightly* faster than going through the function pointer...
-	if (vInfo.bits_per_pixel == 4U) {
+	if (deviceQuirks.pixelFormat == FBINK_PXFMT_Y4) {
 		put_pixel_Gray4(&coords, px);
-	} else if (likely(vInfo.bits_per_pixel == 8U)) {
+	} else if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_Y8)) {
 		put_pixel_Gray8(&coords, px);
 	} else if (vInfo.bits_per_pixel == 16U) {
 		// Do we need to pack the pixel, first?
@@ -427,15 +587,21 @@ static inline __attribute__((always_inline, hot)) void
 			// Yep :(
 			FBInkPixel packed_px;
 			// NOTE: Technically legitimate warning. In practice, we always pass RGB32 pixels in 16bpp codepaths.
-#	pragma GCC diagnostic   push
-#	pragma GCC diagnostic   ignored "-Wunknown-pragmas"
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #	pragma clang diagnostic ignored "-Wunknown-warning-option"
-#	pragma GCC diagnostic   ignored "-Wmaybe-uninitialized"
-                        packed_px.rgb565 = pack_rgb565(px->bgra.color.r, px->bgra.color.g, px->bgra.color.b);
+#	pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+			if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR565)) {
+				packed_px.rgb565 = pack_bgr565(px->bgra.color.r, px->bgra.color.g, px->bgra.color.b);
+			} else {
+				packed_px.rgb565 = pack_rgb565(px->rgba.color.r, px->rgba.color.g, px->rgba.color.b);
+			}
 #	pragma GCC diagnostic pop
 			put_pixel_RGB565(&coords, &packed_px);
 		}
-	} else if (unlikely(vInfo.bits_per_pixel == 24U)) {
+	} else if (unlikely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR24)) {
+		put_pixel_BGR24(&coords, px);
+	} else if (unlikely(deviceQuirks.pixelFormat == FBINK_PXFMT_RGB24)) {
 		put_pixel_RGB24(&coords, px);
 	} else if (likely(vInfo.bits_per_pixel == 32U)) {
 		put_pixel_RGB32(&coords, px);
@@ -491,7 +657,7 @@ static inline __attribute__((always_inline, hot)) void
 }
 
 static inline __attribute__((always_inline)) void
-    get_pixel_RGB24(const FBInkCoordinates* restrict coords, FBInkPixel* restrict px)
+    get_pixel_BGR24(const FBInkCoordinates* restrict coords, FBInkPixel* restrict px)
 {
 	// calculate the pixel's byte offset inside the buffer
 	// note: x * 3 as every pixel is 3 consecutive bytes
@@ -502,6 +668,18 @@ static inline __attribute__((always_inline)) void
 	px->bgra.color.r = *((unsigned char*) (fbPtr + pix_offset + 2U));
 }
 
+static inline __attribute__((always_inline)) void
+    get_pixel_RGB24(const FBInkCoordinates* restrict coords, FBInkPixel* restrict px)
+{
+	// calculate the pixel's byte offset inside the buffer
+	// note: x * 3 as every pixel is 3 consecutive bytes
+	const size_t pix_offset = (coords->x * 3U) + (coords->y * fInfo.line_length);
+
+	px->rgba.color.r = *((unsigned char*) (fbPtr + pix_offset));
+	px->rgba.color.g = *((unsigned char*) (fbPtr + pix_offset + 1U));
+	px->rgba.color.b = *((unsigned char*) (fbPtr + pix_offset + 2U));
+}
+
 static inline __attribute__((always_inline, hot)) void
     get_pixel_RGB32(const FBInkCoordinates* restrict coords, FBInkPixel* restrict px)
 {
@@ -510,14 +688,14 @@ static inline __attribute__((always_inline, hot)) void
 
 #	pragma GCC diagnostic push
 #	pragma GCC diagnostic ignored "-Wcast-align"
-	px->bgra.p = *((uint32_t*) (fbPtr + scanline_offset) + coords->x);
+	px->p = *((uint32_t*) (fbPtr + scanline_offset) + coords->x);
 #	pragma GCC diagnostic pop
 	// NOTE: We generally don't care about alpha, we always assume it's opaque, as that's how it behaves.
 	//       We *do* pickup the actual alpha value, here, though.
 }
 
 static inline __attribute__((always_inline, hot)) void
-    get_pixel_RGB565(const FBInkCoordinates* restrict coords, FBInkPixel* restrict px)
+    get_pixel_BGR565(const FBInkCoordinates* restrict coords, FBInkPixel* restrict px)
 {
 	// calculate the pixel's byte offset inside the buffer
 	const size_t scanline_offset = (size_t) coords->y * fInfo.line_length;
@@ -526,12 +704,12 @@ static inline __attribute__((always_inline, hot)) void
 	// Like put_pixel_RGB565, read those two consecutive bytes at once
 #	pragma GCC diagnostic push
 #	pragma GCC diagnostic ignored "-Wcast-align"
-	const uint16_t         v = *((const uint16_t*) (fbPtr + scanline_offset) + coords->x);
+	const uint16_t v = *((const uint16_t*) (fbPtr + scanline_offset) + coords->x);
 #	pragma GCC diagnostic pop
 
-	// NOTE: Unpack to RGB32, because we have no use for RGB565, it's terrible.
+	// NOTE: Unpack to RGB32, because we have no use for BGR565, it's terrible.
 	// NOTE: c.f., https://stackoverflow.com/q/2442576
-	//       I feel that this approach tracks better with what we do in put_pixel_RGB565,
+	//       I feel that this approach tracks better with what we do in pack_bgr565,
 	//       and I have an easier time following it than the previous approach ported from KOReader.
 	//       Both do exactly the same thing, though ;).
 	const uint8_t r = (uint8_t) ((v & 0xF800u) >> 11U);    // 11111000 00000000 = 0xF800
@@ -541,6 +719,33 @@ static inline __attribute__((always_inline, hot)) void
 	px->bgra.color.r = (uint8_t) ((r << 3U) | (r >> 2U));
 	px->bgra.color.g = (uint8_t) ((g << 2U) | (g >> 4U));
 	px->bgra.color.b = (uint8_t) ((b << 3U) | (b >> 2U));
+}
+
+static inline __attribute__((always_inline, hot)) void
+    get_pixel_RGB565(const FBInkCoordinates* restrict coords, FBInkPixel* restrict px)
+{
+	// calculate the pixel's byte offset inside the buffer
+	const size_t scanline_offset = (size_t) coords->y * fInfo.line_length;
+
+	// NOTE: We're honoring the fb's bitfield offsets here (R: 0, G: >> 5, B: >> 11)
+	// Like put_pixel_RGB565, read those two consecutive bytes at once
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wcast-align"
+	const uint16_t v = *((const uint16_t*) (fbPtr + scanline_offset) + coords->x);
+#	pragma GCC diagnostic pop
+
+	// NOTE: Unpack to RGB32, because we have no use for RGB565, it's terrible.
+	// NOTE: c.f., https://stackoverflow.com/q/2442576
+	//       I feel that this approach tracks better with what we do in pack_rgb565,
+	//       and I have an easier time following it than the previous approach ported from KOReader.
+	//       Both do exactly the same thing, though ;).
+	const uint8_t b = (uint8_t) ((v & 0xF800u) >> 11U);    // 11111000 00000000 = 0xF800
+	const uint8_t g = (v & 0x07E0u) >> 5U;                 // 00000111 11100000 = 0x07E0
+	const uint8_t r = (v & 0x001Fu);                       // 00000000 00011111 = 0x001F
+
+	px->rgba.color.r = (uint8_t) ((r << 3U) | (r >> 2U));
+	px->rgba.color.g = (uint8_t) ((g << 2U) | (g >> 4U));
+	px->rgba.color.b = (uint8_t) ((b << 3U) | (b >> 2U));
 }
 
 // Handle a few sanity checks...
@@ -570,13 +775,17 @@ static inline __attribute__((always_inline, hot)) void
 	}
 
 	// NOTE: Hmm, here, an if ladder appears to be ever so *slightly* faster than going through the function pointer...
-	if (vInfo.bits_per_pixel == 4U) {
+	if (deviceQuirks.pixelFormat == FBINK_PXFMT_Y4) {
 		get_pixel_Gray4(&coords, px);
-	} else if (likely(vInfo.bits_per_pixel == 8U)) {
+	} else if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_Y8)) {
 		get_pixel_Gray8(&coords, px);
-	} else if (vInfo.bits_per_pixel == 16U) {
+	} else if (deviceQuirks.pixelFormat == FBINK_PXFMT_BGR565) {
+		get_pixel_BGR565(&coords, px);
+	} else if (unlikely(deviceQuirks.pixelFormat == FBINK_PXFMT_RGB565)) {
 		get_pixel_RGB565(&coords, px);
-	} else if (unlikely(vInfo.bits_per_pixel == 24U)) {
+	} else if (unlikely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR24)) {
+		get_pixel_BGR24(&coords, px);
+	} else if (unlikely(deviceQuirks.pixelFormat == FBINK_PXFMT_RGB24)) {
 		get_pixel_RGB24(&coords, px);
 	} else if (likely(vInfo.bits_per_pixel == 32U)) {
 		get_pixel_RGB32(&coords, px);
@@ -864,7 +1073,7 @@ static __attribute__((hot)) void
 		size_t px_count = w;
 
 		while (px_count--) {
-			*p++ = px->bgra.p;
+			*p++ = px->p;
 		}
 	}
 
@@ -908,7 +1117,7 @@ static __attribute__((hot)) void
 
 // Helper function to clear the screen - fill whole screen with given color
 static void
-    clear_screen(int fbfd UNUSED_BY_NOTKINDLE, uint8_t v, bool is_flashing UNUSED_BY_NOTKINDLE)
+    clear_screen(int fbfd UNUSED_BY_NOTKINDLE, FBInkPixel* px, bool is_flashing UNUSED_BY_NOTKINDLE)
 {
 #	ifdef FBINK_FOR_KINDLE
 	// NOTE: einkfb has a dedicated ioctl, so, use that, when it's not doing more harm than good...
@@ -923,7 +1132,7 @@ static void
 		// NOTE: We're calling clear_screen to handle is_cleared,
 		//       which means we're probably refreshing twice in these cases...
 		//       Oh, well...
-		if (is_flashing && v == eInkFGCMap[BG_WHITE]) {
+		if (is_flashing && px->gray8 == eInkFGCMap[BG_WHITE]) {
 			if (ioctl(fbfd, FBIO_EINK_CLEAR_SCREEN, EINK_CLEAR_SCREEN) < 0) {
 				PFWARN("FBIO_EINK_CLEAR_SCREEN: %m");
 				// Just warn, this is non-fatal ;).
@@ -937,9 +1146,9 @@ static void
 		//       If we memset the full smem_len, that trips this check, because we probably overwrite both buffers...
 		//       Do a slightly more targeted memset instead (line_length * yres_virtual),
 		//       which should cover the active & visible buffer only...
-		memset(fbPtr, v, fInfo.line_length * vInfo.yres_virtual);
+		memset(fbPtr, px->gray8, fInfo.line_length * vInfo.yres_virtual);
 	} else {
-		memset(fbPtr, v, fInfo.smem_len);
+		memset(fbPtr, px->gray8, fInfo.smem_len);
 	}
 #	else
 	// NOTE: Apparently, some NTX devices do not appreciate a memset of the full smem_len when they're in a 16bpp mode...
@@ -950,32 +1159,29 @@ static void
 	//       Anyway, don't clobber that, as it seems to cause softlocks on BQ/Cervantes,
 	//       and be very conservative, using yres instead of yres_virtual, as Qt *may* already rely on that memory region.
 	if (unlikely(vInfo.bits_per_pixel == 16U)) {
-		// NOTE: Besides, we can't use a straight memset, since we need pixels to be properly packed for RGB565...
-		//       Se we whip up a quick memset16, like fill_rect() does.
-		const uint16_t px = pack_rgb565(v, v, v);
+		// We whip up a quick memset16, like fill_rect_RGB565. Input pixel is guarnteed to be packed properly already.
 #		pragma GCC diagnostic push
 #		pragma GCC diagnostic ignored "-Wcast-align"
-		uint16_t* p = (uint16_t*) fbPtr;
+		uint16_t* p        = (uint16_t*) fbPtr;
 #		pragma GCC diagnostic pop
-		size_t px_count = (size_t) vInfo.xres_virtual * vInfo.yres;
+		size_t    px_count = (size_t) vInfo.xres_virtual * vInfo.yres;
 		while (px_count--) {
-			*p++ = px;
+			*p++ = px->rgb565;
 		}
 	} else if (vInfo.bits_per_pixel == 32U) {
-		// Much like in fill_rect_RGB32, whip up something that'll preserve the alpha byte...
-		const FBInkPixelBGRA px = { .color.b = v, .color.g = v, .color.r = v, .color.a = 0xFF };
+		// Much like in fill_rect_RGB32, do this in a way that'll preserve the alpha byte...
 #		pragma GCC diagnostic push
 #		pragma GCC diagnostic ignored "-Wcast-align"
-		uint32_t* p = (uint32_t*) fbPtr;
+		uint32_t* p        = (uint32_t*) fbPtr;
 #		pragma GCC diagnostic pop
-		size_t px_count = (size_t) vInfo.xres_virtual * vInfo.yres;
+		size_t    px_count = (size_t) vInfo.xres_virtual * vInfo.yres;
 		while (px_count--) {
-			*p++ = px.p;
+			*p++ = px->p;
 		}
 	} else {
 		// NOTE: fInfo.smem_len should actually match fInfo.line_length * vInfo.yres_virtual on 32bpp ;).
 		//       Which is how things should always be, but, alas, poor Yorick...
-		memset(fbPtr, v, fInfo.smem_len);
+		memset(fbPtr, px->gray8, fInfo.smem_len);
 	}
 #	endif
 }
@@ -1007,6 +1213,260 @@ static void
 */
 #endif    // FBINK_WITH_DRAW
 
+// Public convenience wrappers around our internal put/get pixel functions.
+// Performance is *not* a priority for these, avoid them if at all possible!
+// (The main overhead lies in the packing/unpacking of pixels, because our internal pixel data type is... fairly gnarly).
+int
+    fbink_put_pixel_gray(int fbfd   UNUSED_BY_NODRAW,
+			 uint16_t x UNUSED_BY_NODRAW,
+			 uint16_t y UNUSED_BY_NODRAW,
+			 uint8_t v  UNUSED_BY_NODRAW)
+{
+#ifdef FBINK_WITH_DRAW
+	// If we open a fd now, we'll only keep it open for this single call!
+	// NOTE: We *expect* to be initialized at this point, though, but that's on the caller's hands!
+	bool keep_fd = true;
+	if (open_fb_fd(&fbfd, &keep_fd) != EXIT_SUCCESS) {
+		return ERRCODE(EXIT_FAILURE);
+	}
+
+	// Assume success, until shit happens ;)
+	int rv = EXIT_SUCCESS;
+
+	// mmap fb to user mem
+	if (!isFbMapped) {
+		if (memmap_fb(fbfd) != EXIT_SUCCESS) {
+			rv = ERRCODE(EXIT_FAILURE);
+			goto cleanup;
+		}
+	}
+
+	const FBInkCoordinates coords = { .x = x, .y = y };
+	FBInkPixel             px     = pack_pixel_from_y8(v);
+	put_pixel(coords, &px, true);
+
+	// Cleanup
+cleanup:
+	if (isFbMapped && !keep_fd) {
+		unmap_fb();
+	}
+	if (!keep_fd) {
+		close_fb(fbfd);
+	}
+
+	return rv;
+#else
+	WARN("Drawing primitives are disabled in this FBInk build");
+	return ERRCODE(ENOSYS);
+#endif
+}
+
+int
+    fbink_put_pixel_rgba(int fbfd   UNUSED_BY_NODRAW,
+			 uint16_t x UNUSED_BY_NODRAW,
+			 uint16_t y UNUSED_BY_NODRAW,
+			 uint8_t r  UNUSED_BY_NODRAW,
+			 uint8_t g  UNUSED_BY_NODRAW,
+			 uint8_t b  UNUSED_BY_NODRAW,
+			 uint8_t a  UNUSED_BY_NODRAW)
+{
+#ifdef FBINK_WITH_DRAW
+	// If we open a fd now, we'll only keep it open for this single call!
+	// NOTE: We *expect* to be initialized at this point, though, but that's on the caller's hands!
+	bool keep_fd = true;
+	if (open_fb_fd(&fbfd, &keep_fd) != EXIT_SUCCESS) {
+		return ERRCODE(EXIT_FAILURE);
+	}
+
+	// Assume success, until shit happens ;)
+	int rv = EXIT_SUCCESS;
+
+	// mmap fb to user mem
+	if (!isFbMapped) {
+		if (memmap_fb(fbfd) != EXIT_SUCCESS) {
+			rv = ERRCODE(EXIT_FAILURE);
+			goto cleanup;
+		}
+	}
+
+	const FBInkCoordinates coords = { .x = x, .y = y };
+	FBInkPixel             px     = pack_pixel_from_rgba(r, g, b, a);
+	put_pixel(coords, &px, true);
+
+	// Cleanup
+cleanup:
+	if (isFbMapped && !keep_fd) {
+		unmap_fb();
+	}
+	if (!keep_fd) {
+		close_fb(fbfd);
+	}
+
+	return rv;
+#else
+	WARN("Drawing primitives are disabled in this FBInk build");
+	return ERRCODE(ENOSYS);
+#endif
+}
+
+// To avoid the overhead of repeatedly packing the same color,
+// expose variants of the above that allow the API user to store such a packed pixel,
+// and pass it to specific variants (fbink_put_pixel & fbink_fill_rect).
+int
+    fbink_pack_pixel_gray(uint8_t y UNUSED_BY_NODRAW, uint32_t* px UNUSED_BY_NODRAW)
+{
+#ifdef FBINK_WITH_DRAW
+	FBInkPixel p = pack_pixel_from_y8(y);
+	*px          = p.p;
+
+	return EXIT_SUCCESS;
+#else
+	WARN("Drawing primitives are disabled in this FBInk build");
+	return ERRCODE(ENOSYS);
+#endif
+}
+
+int
+    fbink_pack_pixel_rgba(uint8_t r    UNUSED_BY_NODRAW,
+			  uint8_t g    UNUSED_BY_NODRAW,
+			  uint8_t b    UNUSED_BY_NODRAW,
+			  uint8_t a    UNUSED_BY_NODRAW,
+			  uint32_t* px UNUSED_BY_NODRAW)
+{
+#ifdef FBINK_WITH_DRAW
+	FBInkPixel p = pack_pixel_from_rgba(r, g, b, a);
+	*px          = p.p;
+
+	return EXIT_SUCCESS;
+#else
+	WARN("Drawing primitives are disabled in this FBInk build");
+	return ERRCODE(ENOSYS);
+#endif
+}
+
+int
+    fbink_put_pixel(int fbfd   UNUSED_BY_NODRAW,
+		    uint16_t x UNUSED_BY_NODRAW,
+		    uint16_t y UNUSED_BY_NODRAW,
+		    void* px   UNUSED_BY_NODRAW)
+{
+#ifdef FBINK_WITH_DRAW
+	// If we open a fd now, we'll only keep it open for this single call!
+	// NOTE: We *expect* to be initialized at this point, though, but that's on the caller's hands!
+	bool keep_fd = true;
+	if (open_fb_fd(&fbfd, &keep_fd) != EXIT_SUCCESS) {
+		return ERRCODE(EXIT_FAILURE);
+	}
+
+	// Assume success, until shit happens ;)
+	int rv = EXIT_SUCCESS;
+
+	// mmap fb to user mem
+	if (!isFbMapped) {
+		if (memmap_fb(fbfd) != EXIT_SUCCESS) {
+			rv = ERRCODE(EXIT_FAILURE);
+			goto cleanup;
+		}
+	}
+
+	const FBInkCoordinates coords = { .x = x, .y = y };
+	put_pixel(coords, px, true);
+
+	// Cleanup
+cleanup:
+	if (isFbMapped && !keep_fd) {
+		unmap_fb();
+	}
+	if (!keep_fd) {
+		close_fb(fbfd);
+	}
+
+	return rv;
+#else
+	WARN("Drawing primitives are disabled in this FBInk build");
+	return ERRCODE(ENOSYS);
+#endif
+}
+
+int
+    fbink_get_pixel(int fbfd   UNUSED_BY_NODRAW,
+		    uint16_t x UNUSED_BY_NODRAW,
+		    uint16_t y UNUSED_BY_NODRAW,
+		    uint8_t* r UNUSED_BY_NODRAW,
+		    uint8_t* g UNUSED_BY_NODRAW,
+		    uint8_t* b UNUSED_BY_NODRAW,
+		    uint8_t* a UNUSED_BY_NODRAW)
+{
+#ifdef FBINK_WITH_DRAW
+	// If we open a fd now, we'll only keep it open for this single call!
+	// NOTE: We *expect* to be initialized at this point, though, but that's on the caller's hands!
+	bool keep_fd = true;
+	if (open_fb_fd(&fbfd, &keep_fd) != EXIT_SUCCESS) {
+		return ERRCODE(EXIT_FAILURE);
+	}
+
+	// Assume success, until shit happens ;)
+	int rv = EXIT_SUCCESS;
+
+	// mmap fb to user mem
+	if (!isFbMapped) {
+		if (memmap_fb(fbfd) != EXIT_SUCCESS) {
+			rv = ERRCODE(EXIT_FAILURE);
+			goto cleanup;
+		}
+	}
+
+	const FBInkCoordinates coords = { .x = x, .y = y };
+	// The only wait for get_pixel not to write to px would be to be poking at an unsupported pixel format.
+	// Which means we're *not* running at all ;D (c.f., initialize_fbink). So this is a non-issue.
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+	FBInkPixel px;
+#	pragma GCC diagnostic push
+	get_pixel(coords, &px);
+
+	// Unpack the pixel for public consumption
+	if (deviceQuirks.pixelFormat == FBINK_PXFMT_Y4 || deviceQuirks.pixelFormat == FBINK_PXFMT_Y8) {
+		*r = px.gray8;
+		*g = px.gray8;
+		*b = px.gray8;
+		*a = 0xFFu;
+	} else if (deviceQuirks.isRGB) {
+		*r = px.rgba.color.r;
+		*g = px.rgba.color.g;
+		*b = px.rgba.color.b;
+		if (vInfo.bits_per_pixel == 32U) {
+			*a = px.rgba.color.a;
+		} else {
+			*a = 0xFFu;
+		}
+	} else {
+		*r = px.bgra.color.r;
+		*g = px.bgra.color.g;
+		*b = px.bgra.color.b;
+		if (vInfo.bits_per_pixel == 32U) {
+			*a = px.bgra.color.a;
+		} else {
+			*a = 0xFFu;
+		}
+	}
+
+	// Cleanup
+cleanup:
+	if (isFbMapped && !keep_fd) {
+		unmap_fb();
+	}
+	if (!keep_fd) {
+		close_fb(fbfd);
+	}
+
+	return rv;
+#else
+	WARN("Drawing primitives are disabled in this FBInk build");
+	return ERRCODE(ENOSYS);
+#endif
+}
+
 #ifdef FBINK_WITH_BITMAP
 // Return the font8x8 bitmap for a specific Unicode codepoint
 static const unsigned char*
@@ -1015,15 +1475,15 @@ static const unsigned char*
 	// Get the bitmap for the character mapped to that Unicode codepoint
 	if (likely(codepoint <= 0x7Fu)) {
 		return font8x8_basic[codepoint];
-	} else if (codepoint >= 0x80u && codepoint <= 0x9Fu) {    // lgtm [cpp/constant-comparison]
+	} else if (codepoint >= 0x80u && codepoint <= 0x9Fu) {
 		return font8x8_control[codepoint - 0x80u];
-	} else if (codepoint >= 0xA0u && codepoint <= 0xFFu) {    // lgtm [cpp/constant-comparison]
+	} else if (codepoint >= 0xA0u && codepoint <= 0xFFu) {
 		return font8x8_ext_latin[codepoint - 0xA0u];
 	} else if (codepoint >= 0x390u && codepoint <= 0x3C9u) {
 		return font8x8_greek[codepoint - 0x390u];
 	} else if (codepoint >= 0x2500u && codepoint <= 0x257Fu) {
 		return font8x8_box[codepoint - 0x2500u];
-	} else if (codepoint >= 0x2580u && codepoint <= 0x259Fu) {    // lgtm [cpp/constant-comparison]
+	} else if (codepoint >= 0x2580u && codepoint <= 0x259Fu) {
 		return font8x8_block[codepoint - 0x2580u];
 	} else if (codepoint >= 0x3040u && codepoint <= 0x309Fu) {
 		return font8x8_hiragana[codepoint - 0x3040u];
@@ -1036,7 +1496,7 @@ static const unsigned char*
 #endif    // FBINK_WITH_BITMAP
 
 static __attribute__((cold)) const char*
-    fontname_to_string(uint8_t fontname)
+    fontname_to_string(FONT_INDEX_E fontname)
 {
 	switch (fontname) {
 #ifdef FBINK_WITH_BITMAP
@@ -1168,16 +1628,10 @@ static struct mxcfb_rect
 	FBInkPixel fgP = penFGPixel;
 	FBInkPixel bgP = penBGPixel;
 	if (fbink_cfg->is_inverted) {
-		// NOTE: And, of course, RGB565 is terrible. Inverting the lossy packed value would be even lossier...
-		if (unlikely(vInfo.bits_per_pixel == 16U)) {
-			const uint8_t fgcolor = penFGColor ^ 0xFFu;
-			const uint8_t bgcolor = penBGColor ^ 0xFFu;
-			fgP.rgb565            = pack_rgb565(fgcolor, fgcolor, fgcolor);
-			bgP.rgb565            = pack_rgb565(bgcolor, bgcolor, bgcolor);
-		} else {
-			fgP.bgra.p ^= 0x00FFFFFFu;
-			bgP.bgra.p ^= 0x00FFFFFFu;
-		}
+		// NOTE: As far as RGB565 is concerned, our fill/put methods will only ever use the .rgb565 field,
+		//       so we don't actually care about flipping one extra byte here, nothing will ever read it ;).
+		fgP.p ^= 0x00FFFFFFu;
+		bgP.p ^= 0x00FFFFFFu;
 	}
 
 	// Adjust row in case we're a continuation of a multi-line print...
@@ -1229,7 +1683,7 @@ static struct mxcfb_rect
 	// Compute the dimension of the screen region we'll paint to (taking multi-line into account)
 	struct mxcfb_rect region = {
 		.top  = (uint32_t) MAX(0 + (viewVertOrigin - viewVertOffset),
-                                      (((row - multiline_offset) * FONTH) + voffset + viewVertOrigin)),
+				       (((row - multiline_offset) * FONTH) + voffset + viewVertOrigin)),
 		.left = (uint32_t) MAX(0 + viewHoriOrigin, ((col * FONTW) + hoffset + viewHoriOrigin)),
 		.width =
 		    multiline_offset > 0U ? (screenWidth - (uint32_t) (col * FONTW)) : (uint32_t) (charcount * FONTW),
@@ -1560,8 +2014,8 @@ static struct mxcfb_rect
 							if (is_fgpx && !fbink_cfg->is_fgless) {                                        \
 								if (fbink_cfg->is_overlay) {                                           \
 									get_pixel(coords, &fbP);                                       \
-									fbP.bgra.p ^= 0x00FFFFFFu;                                     \
-									pxP = &fbP;                                                    \
+									fbP.p ^= 0x00FFFFFFu;                                          \
+									pxP    = &fbP;                                                 \
 									put_pixel(coords, pxP, false);                                 \
 								} else {                                                               \
 									put_pixel(coords, pxP, true);                                  \
@@ -1753,6 +2207,8 @@ static int
 	// NOTE: Getting UPDATE_DISPLAY_AREA to actually flash seems to be less straightforward than it appears...
 	//       That said, fx_update_full does behave differently than fx_update_partial, despite the lack of flash,
 	//       and it really is what the framework itself uses...
+	// NOTE: Using fx_update_slow instead could be a viable solution,
+	//       c.f., https://github.com/koreader/koreader-base/pull/2481
 	int  rv;
 	bool is_fs = false;
 	if (region.width == vInfo.xres && region.height == vInfo.yres) {
@@ -1926,6 +2382,8 @@ static int
 	const uint32_t waveform_mode = (fbink_cfg->is_flashing && fbink_cfg->wfm_mode == WFM_AUTO)
 					   ? get_wfm_mode(WFM_GC16)
 					   : get_wfm_mode(fbink_cfg->wfm_mode);
+	// NOTE: The caller is responsible for honoring the expected wfm + mode pairings, if any.
+	//       e.g., REAGL should always be paired with FULL.
 	const uint32_t update_mode   = fbink_cfg->is_flashing ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
 
 	// Did we request legacy dithering?
@@ -2018,6 +2476,8 @@ static int
 	const uint32_t waveform_mode = (fbink_cfg->is_flashing && fbink_cfg->wfm_mode == WFM_AUTO)
 					   ? get_wfm_mode(WFM_GC16)
 					   : get_wfm_mode(fbink_cfg->wfm_mode);
+	// NOTE: The caller is responsible for honoring the expected wfm + mode pairings, if any.
+	//       e.g., REAGL should always be paired with FULL.
 	const uint32_t update_mode   = fbink_cfg->is_flashing ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
 
 	// Did we request legacy dithering?
@@ -2100,7 +2560,7 @@ static int
 	return EXIT_SUCCESS;
 }
 
-// Kindle PaperWhite 5, Basic 4 & Scribe ([PW5<->??)
+// Kindle PaperWhite 5, Basic 4, Scribe, Basic 5, PaperWhite 6, ColorSoft, Scribe 2 ([PW5<->??)
 static int
     refresh_kindle_mtk(int fbfd, const struct mxcfb_rect region, const FBInkConfig* fbink_cfg)
 {
@@ -2108,6 +2568,8 @@ static int
 	const uint32_t waveform_mode = (fbink_cfg->is_flashing && fbink_cfg->wfm_mode == WFM_AUTO)
 					   ? get_wfm_mode(WFM_GC16)
 					   : get_wfm_mode(fbink_cfg->wfm_mode);
+	// NOTE: The caller is responsible for honoring the expected wfm + mode pairings, if any.
+	//       e.g., REAGL should always be paired with FULL.
 	const uint32_t update_mode   = fbink_cfg->is_flashing ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
 
 	// NOTE: Despite the struct layout, the EPDC v2 style of dithering setup is unused,
@@ -2134,9 +2596,11 @@ static int
 	};
 
 	// NOTE: If the intent is a true night mode (rather than a one off),
-	//       the kernel prefers the fb state being set to GRAYSCALE_8BIT_INVERTED,
+	//       the kernel prefers the fb state being set to GRAYSCALE_8BIT_INVERTED (or GRAYSCALE_COLOR_NIGHTMODE for CFA),
 	//       as it's used to handle a few nightmode shenanigans...
 	if (fbink_cfg->is_nightmode) {
+		// FIXME: On Bellatrix4, might not be compatible w/ CFA (i.e., needs MTK_EPDC_FLAG_SKIP_CFA),
+		//        so you should *really* prefer the grayscale flag approach...
 		update.flags |= EPDC_FLAG_ENABLE_INVERSION;
 	}
 
@@ -2173,17 +2637,26 @@ static int
 	}
 
 	// NOTE: Despite what hwtcon_mdp_convert @ drivers/misc/mediatek/hwtcon_v2/hwtcon_mdp.c does,
-	//       dithering doesn't seem to actually *do* anything...
+	//       dithering doesn't seem to actually *do* anything on the initial Bellatrix boards...
 	// NOTE: This *might* be fixed on Bellatrix3, with the caveat that the MDP is bypassed in some cases in pen mode
 	//       (mostly DU/DUNM updates of < MIN_MDP_SIZE (6000) pixels regions at 90 or 270° rotations).
 	if (fbink_cfg->dithering_mode != HWD_PASSTHROUGH) {
-		// NOTE: If dither actually worked, MONOCHROME + DITHER might actually have been viable...
+		// FIXME: When dither actually works, MONOCHROME + DITHER might actually be a viable combination...
 		update.flags &= (unsigned int) ~EPDC_FLAG_FORCE_MONOCHROME;
 
-		// NOTE: Not much variety left, this is the only flag currently honored.
-		//       Dithering is handled as part of the image processing pass by the MDP.
-		// NOTE: As mentioned above, it doesn't currently appear to do anything, though...
-		update.flags |= MTK_EPDC_FLAG_USE_DITHERING_Y4;
+		if (deviceQuirks.isKindleBellatrix4) {
+			// Should work properly on Bellatrix4, where we also have proper Y1 support
+			if (waveform_mode == MTK_WAVEFORM_MODE_A2 || waveform_mode == MTK_WAVEFORM_MODE_DU) {
+				update.flags |= EPDC_FLAG_USE_DITHERING_Y1;    // Maps to MDP_DITHER_ALGO_Y8_Y1_S
+			} else {
+				update.flags |= MTK_EPDC_FLAG_USE_DITHERING_Y4;    // Maps to MDP_DITHER_ALGO_Y8_Y4_S
+			}
+		} else {
+			// NOTE: Not much variety left, this is the only flag currently honored.
+			//       Dithering is handled as part of the image processing pass by the MDP.
+			// NOTE: As mentioned above, it doesn't currently appear to do anything, though...
+			update.flags |= MTK_EPDC_FLAG_USE_DITHERING_Y4;
+		}
 	}
 
 	int rv = ioctl(fbfd, MXCFB_SEND_UPDATE_MTK, &update);
@@ -2212,17 +2685,17 @@ static int
 	const uint32_t waveform_mode = (fbink_cfg->is_flashing && fbink_cfg->wfm_mode == WFM_AUTO)
 					   ? get_wfm_mode(WFM_GC16)
 					   : get_wfm_mode(fbink_cfg->wfm_mode);
-	const uint32_t update_mode = fbink_cfg->is_flashing ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
+	const uint32_t update_mode   = fbink_cfg->is_flashing ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
 
 	struct mxcfb_update_data update = {
-		.update_region = region,
-		.waveform_mode = waveform_mode,
-		.update_mode = update_mode,
-		.update_marker = lastMarker,
-		.temp = TEMP_USE_AMBIENT,
-		.flags = (waveform_mode == WAVEFORM_MODE_REAGLD) ? EPDC_FLAG_USE_AAD
-			 : (waveform_mode == WAVEFORM_MODE_A2) ? EPDC_FLAG_FORCE_MONOCHROME
-							       : 0U,
+		.update_region   = region,
+		.waveform_mode   = waveform_mode,
+		.update_mode     = update_mode,
+		.update_marker   = lastMarker,
+		.temp            = TEMP_USE_AMBIENT,
+		.flags           = (waveform_mode == WAVEFORM_MODE_REAGLD) ? EPDC_FLAG_USE_AAD
+				   : (waveform_mode == WAVEFORM_MODE_A2)   ? EPDC_FLAG_FORCE_MONOCHROME
+									   : 0U,
 		.alt_buffer_data = { 0U },
 	};
 
@@ -2381,9 +2854,9 @@ static int
 					    .update_mode   = update_mode,
 					    .update_marker = lastMarker,
 					    .temp          = (waveform_mode == WAVEFORM_MODE_DU) ? 24 : TEMP_USE_AMBIENT,
-					    .flags         = (waveform_mode == WAVEFORM_MODE_REAGLD) ? EPDC_FLAG_USE_AAD
-							     : (waveform_mode == WAVEFORM_MODE_A2) ? EPDC_FLAG_FORCE_MONOCHROME
-												   : 0U,
+					    .flags = (waveform_mode == WAVEFORM_MODE_REAGLD) ? EPDC_FLAG_USE_AAD
+						     : (waveform_mode == WAVEFORM_MODE_A2)   ? EPDC_FLAG_FORCE_MONOCHROME
+											     : 0U,
 					    .alt_buffer_data = { 0U } };
 
 	if (fbink_cfg->is_nightmode && deviceQuirks.canHWInvert) {
@@ -2463,6 +2936,9 @@ static int
 	const uint32_t waveform_mode = (fbink_cfg->is_flashing && fbink_cfg->wfm_mode == WFM_AUTO)
 					   ? get_wfm_mode(WFM_GC16)
 					   : get_wfm_mode(fbink_cfg->wfm_mode);
+	// NOTE: The caller is responsible for honoring the expected wfm + mode pairings, if any.
+	//       e.g., REAGLD, which is only ever used and implemented "properly" on the original Aura,
+	//       should always be paired with FULL.
 	const uint32_t update_mode   = fbink_cfg->is_flashing ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
 
 	struct mxcfb_update_data_v1_ntx update = {
@@ -2573,7 +3049,7 @@ static int
 	//       when hardware dithering is enabled: the driver ought to be taking care of it, but something goes wrong somewhere,
 	//       leading to non-aligned partial refreshes possibly visibly "moving" the content by a few pixels.
 	//       For more details and a viable workaround, c.f.,
-	//       https://github.com/koreader/koreader-base/blob/0792aeb2a0d4c9e48cee728579fd4a9924971df0/ffi/framebuffer_mxcfb.lua#L256-L276
+	//       https://github.com/koreader/koreader-base/blob/9a90ea881201ae64f188150b4e3c02daeb3901bc/ffi/blitbuffer.lua#L1058-L1123
 	// NOTE: Specifically on the Kobo Libra, we've also seen multiple reports of the WAIT_FOR_UPDATE_COMPLETE ioctl
 	//       failing with a timeout in bog-standard circumstances where it doesn't really appear to have any reason to fail.
 	//       c.f., https://github.com/koreader/koreader/issues/7340
@@ -2586,6 +3062,9 @@ static int
 	const uint32_t waveform_mode = (fbink_cfg->is_flashing && fbink_cfg->wfm_mode == WFM_AUTO)
 					   ? get_wfm_mode(WFM_GC16)
 					   : get_wfm_mode(fbink_cfg->wfm_mode);
+	// NOTE: The caller is responsible for honoring the expected wfm + mode pairings, if any.
+	//       e.g., REAGL should always be paired with *PARTIAL*.
+	//       This is in stark contrast with most other REAGL implementations!
 	const uint32_t update_mode   = fbink_cfg->is_flashing ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
 
 	// Did we request legacy dithering?
@@ -2721,6 +3200,9 @@ static int
 					   .cfa_use     = 0U };
 
 	// Update mode shenanigans...
+	// NOTE: The caller is responsible for honoring the expected wfm + mode pairings, if any.
+	//       e.g., REAGL should always be paired with *PARTIAL*.
+	//       This is in stark contrast with most other REAGL implementations!
 	if (!fbink_cfg->is_flashing && waveform_mode != EINK_AUTO_MODE) {
 		// For some reason, AUTO shouldn't specify PARTIAL...
 		// (it trips the unknown mode warning, which falls back to... plain AUTO ;)).
@@ -2732,6 +3214,8 @@ static int
 	}
 	if (waveform_mode == EINK_A2_MODE) {
 		// NOTE: Unlike on mxcfb, this isn't HW assisted, this just uses the "simple" Y8->Y1 dither algorithm...
+		// NOTE: That might be a strike against it when used for pen mode, jury's still out on that front...
+		//       (FWIW, MTK *does* do something similar for its own A2 pen mode... but it's HW-assisted by the MDP there).
 		update.update_mode |= EINK_MONOCHROME;
 	}
 	if (fbink_cfg->no_merge) {
@@ -2801,6 +3285,181 @@ static int
 	return EXIT_SUCCESS;
 }
 
+// Kobo Mark 11 devices on MTK SoCs
+static int
+    refresh_kobo_mtk(int fbfd, const struct mxcfb_rect region, const FBInkConfig* fbink_cfg)
+{
+	// NOTE: There appears to be a slightly different issue with refresh regions than what happened on Mk. 7 with dithering:
+	//       despite a perfectly sized & positioned region, the effective refresh *may*,
+	//       under circumstances I haven't really identified yet, be cut off 1 pixel short.
+	//       That obviously smells like an off-by-one somewhere in the driver, so, yeah, if you ever encounter that,
+	//       consider enforcing aligning refresh coordinates & dimensions to multiples of 8 as described above...
+	// Handle the common waveform_mode/update_mode switcheroo...
+	const uint32_t waveform_mode = (fbink_cfg->is_flashing && fbink_cfg->wfm_mode == WFM_AUTO)
+					   ? get_wfm_mode(WFM_GC16)
+					   : get_wfm_mode(fbink_cfg->wfm_mode);
+	// NOTE: The caller is responsible for honoring the expected wfm + mode pairings, if any.
+	//       e.g., REAGL, GLRC16 & GCC16 should always be paired with FULL...
+	//       Except on the Elipsa 2E, which behaves like older Kobo devices, and expects PARTIAL...
+	// NOTE: Speaking of the Elipsa 2E, eclipse waveform modes (GLKW16 & GCK16)
+	//       appear to be utterly broken unless the framebuffer is setup @ 32bpp...
+	//       Hard to say if later devices are also affected, as they no longer support anything else than 32bpp ;).
+	const uint32_t update_mode   = fbink_cfg->is_flashing ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
+
+	// NOTE: hwtcon_rect and mxcfb_rect are perfectly interchangeable
+	struct hwtcon_update_data update = {
+		.update_region = { .top    = region.top,
+                                  .left   = region.left,
+                                  .width  = region.width,
+                                  .height = region.height },
+		.waveform_mode = waveform_mode,
+		.update_mode   = update_mode,
+		.update_marker = lastMarker,
+		.flags         = 0U,
+		.dither_mode   = 0
+	};
+	// NOTE: We'll leave A2 alone by default, see the musings about HWTCON_FLAG_FORCE_A2_OUTPUT for pen shenanigans below;
+	//       but for general purposes, it doesn't appear to make sense.
+	//       What *does* is dithering, which appears to be the only form of HW dithering Nickel seems to use for now,
+	//       for *some* of its A2 updates (e.g., mainly small UI highlights). It uses AUTO for larger UI highlights,
+	//       and undithered A2 for virtual keyboard highlights *and* unhighlights (and DU for the text field).
+	//       (In the context of the virtual keyboard, another specificity is that no wait_for ioctls are used *at all*).
+
+	// NOTE: There isn't a per-update concept, fb inversion is global.
+	//       The kernel makes a distinction between `enable_night_mode`/`night_mode`, which affects low-level timing and power shenanigans,
+	//       and is (by default, unless you use the broken HWTCON_SET_NIGHTMODE ioctl) automatically enabled for updates
+	//       using an Eclipse waveform mode (i.e., GCK16 & GLKW16) and `invert_fb`.
+	//       You can use fbink_set_fb_info to poke at that internal `invert_fb` flag on its own.
+	/*
+	if (fbink_cfg->is_nightmode && deviceQuirks.canHWInvert) {
+		// FIXME: See how well toggling invert_fb here to fake a per-update flag would work?
+		// FIXME: In the same vein, handling pen mode might require clunky APIs,
+		//        as it involves A2 + HWTCON_FLAG_FORCE_A2_OUTPUT +/- HWTCON_FLAG_FORCE_A2_OUTPUT_(WHITE|BLACK)...
+	}
+	*/
+
+	// Dithering is handled as part of the image processing pass by the MDP.
+	if (fbink_cfg->dithering_mode != HWD_PASSTHROUGH) {
+		// FIXME: That combination might actually be viable here...
+		update.flags &= (unsigned int) ~HWTCON_FLAG_FORCE_A2_OUTPUT;
+		update.flags |= HWTCON_FLAG_USE_DITHERING;
+
+		switch (fbink_cfg->dithering_mode) {
+			case HWD_QUANT_ONLY:
+				update.dither_mode = HWTCON_FLAG_USE_DITHERING_Y8_Y4_Q;
+				break;
+			case HWD_ORDERED:
+				update.dither_mode = HWTCON_FLAG_USE_DITHERING_Y8_Y4_B;
+				break;
+			case HWD_FLOYD_STEINBERG:
+			default:
+				update.dither_mode = HWTCON_FLAG_USE_DITHERING_Y8_Y4_S;
+				break;
+		}
+
+		// It's easy enough to swap from Y4 targets to Y1 targets: just add 0x200 ;).
+		if (waveform_mode == HWTCON_WAVEFORM_MODE_A2 || waveform_mode == HWTCON_WAVEFORM_MODE_DU) {
+			update.dither_mode += 0x200;
+		}
+	}
+
+	// Setup the CFA mode flags (if any, and if the waveform mode makes sense for that)
+	// NOTE: You can technically apply this to *any* waveform mode, and, in fact, on a color panel @ 32bpp,
+	//       unless you explicitly request CFA_SKIP, *every* refresh implies CFA processing.
+	//       But if you really don't want color, we have a much better solution: just switch to 8bpp ;).
+	//       (On that note, if the two CPU cores are online, the CFA processing is spread across two kernel threads,
+	//       but the performance impact is hard to measure with the naked eye).
+	if (fbink_cfg->wfm_mode == WFM_GCC16 || fbink_cfg->wfm_mode == WFM_GLRC16) {
+		switch (fbink_cfg->cfa_mode) {
+			case CFA_AIE_S4:
+				update.flags |= HWTCON_FLAG_CFA_EINK_AIE_S4;
+				break;
+			case CFA_AIE_S7:
+				update.flags |= HWTCON_FLAG_CFA_EINK_AIE_S7;
+				break;
+			case CFA_AIE_S9:
+				update.flags |= HWTCON_FLAG_CFA_EINK_AIE_S9;
+				break;
+			case CFA_G0:
+				update.flags |= HWTCON_FLAG_CFA_EINK_G0;
+				break;
+			case CFA_G1:
+				update.flags |= HWTCON_FLAG_CFA_EINK_G1;
+				break;
+			case CFA_G2:
+				update.flags |= HWTCON_FLAG_CFA_EINK_G2;
+				break;
+			case CFA_NTX:
+				update.flags |= HWTCON_FLAG_CFA_EINK_NTX;
+				break;
+			case CFA_NTX_SF:
+				update.flags |= HWTCON_FLAG_CFA_EINK_NTX_SF;
+				break;
+			case CFA_SKIP:
+				update.flags |= HWTCON_FLAG_CFA_SKIP;
+				break;
+			default:
+				// NOP, matches G1 (or whatever was set via HWTCON_SET_CFA_MODE)...
+				break;
+		}
+	}
+
+	int rv = ioctl(fbfd, HWTCON_SEND_UPDATE, &update);
+
+	if (rv < 0) {
+		PFWARN("HWTCON_SEND_UPDATE: %m");
+		if (errno == EINVAL) {
+			WARN("update_region={top=%u, left=%u, width=%u, height=%u}",
+			     region.top,
+			     region.left,
+			     region.width,
+			     region.height);
+		}
+		return ERRCODE(EXIT_FAILURE);
+	}
+
+	return EXIT_SUCCESS;
+}
+
+static int
+    wait_for_submission_kobo_mtk(int fbfd, uint32_t marker)
+{
+	int rv = ioctl(fbfd, HWTCON_WAIT_FOR_UPDATE_SUBMISSION, &marker);
+
+	if (rv < 0) {
+		PFWARN("HWTCON_WAIT_FOR_UPDATE_SUBMISSION: %m");
+		return ERRCODE(EXIT_FAILURE);
+	} else {
+		if (rv == 0) {
+			LOG("Update %u has already fully been submitted", marker);
+		} else {
+			// NOTE: Timeout is set to 5000ms
+			LOG("Waited %ldms for submission of update %u", (5000 - jiffies_to_ms(rv)), marker);
+		}
+	}
+
+	return EXIT_SUCCESS;
+}
+
+static int
+    wait_for_complete_kobo_mtk(int fbfd, uint32_t marker)
+{
+	int rv = ioctl(fbfd, HWTCON_WAIT_FOR_UPDATE_COMPLETE, &marker);
+
+	if (rv < 0) {
+		PFWARN("HWTCON_WAIT_FOR_UPDATE_COMPLETE: %m");
+		return ERRCODE(EXIT_FAILURE);
+	} else {
+		if (rv == 0) {
+			LOG("Update %u has already fully been completed", marker);
+		} else {
+			// NOTE: Timeout is set to 5000ms
+			LOG("Waited %ldms for completion of update %u", (5000 - jiffies_to_ms(rv)), marker);
+		}
+	}
+
+	return EXIT_SUCCESS;
+}
 #	endif    // FBINK_FOR_KINDLE
 #endif            // !FBINK_FOR_LINUX
 
@@ -2927,13 +3586,13 @@ int
 	PFWARN("This feature is not supported on your device");
 	return ERRCODE(ENOSYS);
 #else
-	if (!deviceQuirks.isKindleMTK) {
+	if (!deviceQuirks.isMTK) {
 		PFWARN("This feature is not supported on your device");
 		return ERRCODE(ENOSYS);
 	}
 
 	mtkSwipeData.direction = (uint32_t) direction;
-	mtkSwipeData.steps = (uint32_t) steps;
+	mtkSwipeData.steps     = (uint32_t) steps;
 
 	return EXIT_SUCCESS;
 #endif    // !FBINK_FOR_KINDLE
@@ -2946,7 +3605,7 @@ int
 	PFWARN("This feature is not supported on your device");
 	return ERRCODE(ENOSYS);
 #else
-	if (!deviceQuirks.isKindleMTK) {
+	if (!deviceQuirks.isMTK) {
 		PFWARN("This feature is not supported on your device");
 		return ERRCODE(ENOSYS);
 	}
@@ -2959,7 +3618,7 @@ int
 
 	// We don't care about the feature check, so just leave everything empty.
 	mxcfb_markers_data markers_data = { 0U };
-	int rv = ioctl(fbfd, MXCFB_WAIT_FOR_ANY_UPDATE_COMPLETE_MTK, &markers_data);
+	int                rv           = ioctl(fbfd, MXCFB_WAIT_FOR_ANY_UPDATE_COMPLETE_MTK, &markers_data);
 
 	if (rv < 0) {
 		PFWARN("MXCFB_WAIT_FOR_ANY_UPDATE_COMPLETE_MTK: %m");
@@ -2997,7 +3656,7 @@ int
 	PFWARN("This feature is not supported on your device");
 	return ERRCODE(ENOSYS);
 #else
-	if (!deviceQuirks.isKindleMTK) {
+	if (!deviceQuirks.isMTK) {
 		PFWARN("This feature is not supported on your device");
 		return ERRCODE(ENOSYS);
 	}
@@ -3046,7 +3705,7 @@ int
 	PFWARN("This feature is not supported on your device");
 	return ERRCODE(ENOSYS);
 #else
-	if (!deviceQuirks.isKindleMTK) {
+	if (!deviceQuirks.isMTK) {
 		PFWARN("This feature is not supported on your device");
 		return ERRCODE(ENOSYS);
 	}
@@ -3088,7 +3747,7 @@ int
 	return ERRCODE(ENOSYS);
 #else
 	// NOTE: Technically requires a Bellatrix3, will return HWTCON_STATUS_INVALID_IOCTL_CMD (-4) otherwise.
-	if (!deviceQuirks.isKindleMTK) {
+	if (!deviceQuirks.isMTK) {
 		PFWARN("This feature is not supported on your device");
 		return ERRCODE(ENOSYS);
 	}
@@ -3100,7 +3759,7 @@ int
 	}
 
 	uint32_t mode = toggle ? (uint32_t) EPDC_STYLUS_MODE_WITH_NO_TPS : (uint32_t) EPDC_STYLUS_MODE_DISABLED;
-	int rv = ioctl(fbfd, MXCFB_SET_STYLUS_MODE, &mode);
+	int      rv   = ioctl(fbfd, MXCFB_SET_STYLUS_MODE, &mode);
 
 	if (rv < 0) {
 		PFWARN("MXCFB_SET_STYLUS_MODE: %m");
@@ -3206,7 +3865,7 @@ static int
 #	endif
 
 #	if defined(FBINK_FOR_KINDLE)
-	if (deviceQuirks.isKindleMTK) {
+	if (deviceQuirks.isMTK) {
 		return refresh_kindle_mtk(fbfd, region, fbink_cfg);
 	} else if (deviceQuirks.isKindleRex) {
 		return refresh_kindle_rex(fbfd, region, fbink_cfg);
@@ -3222,7 +3881,9 @@ static int
 #	elif defined(FBINK_FOR_POCKETBOOK)
 	return refresh_pocketbook(fbfd, region, fbink_cfg);
 #	elif defined(FBINK_FOR_KOBO)
-	if (deviceQuirks.isSunxi) {
+	if (deviceQuirks.isMTK) {
+		return refresh_kobo_mtk(fbfd, region, fbink_cfg);
+	} else if (deviceQuirks.isSunxi) {
 		return refresh_kobo_sunxi(region, fbink_cfg);
 	} else if (deviceQuirks.isKoboMk7) {
 		return refresh_kobo_mk7(fbfd, region, fbink_cfg);
@@ -3258,22 +3919,30 @@ static int
 #endif            // FBINK_FOR_LINUX
 
 // Same thing for WAIT_FOR_UPDATE_SUBMISSION requests...
-#ifndef FBINK_FOR_LINUX
-#	if defined(FBINK_FOR_KINDLE)
-// This is only implemented on Kindle kernels...
+#if defined(FBINK_FOR_KINDLE) || defined(FBINK_FOR_KOBO)
 static int
     wait_for_submission(int fbfd, uint32_t marker)
 {
+#	if defined(FBINK_FOR_KINDLE)
 	// Only implemented for mxcfb Kindles...
 	if (deviceQuirks.isKindleLegacy) {
-		return EXIT_SUCCESS;
+		return ERRCODE(ENOSYS);
 	} else {
 		return wait_for_submission_kindle(fbfd, marker);
 	}
+#	elif defined(FBINK_FOR_KOBO)
+	// Only implemented on MTK
+	if (deviceQuirks.isMTK) {
+		return wait_for_submission_kobo_mtk(fbfd, marker);
+	} else {
+		return ERRCODE(ENOSYS);
+	}
+#	endif
 }
-#	endif    // FBINK_FOR_KINDLE
+#endif    // FBINK_FOR_KINDLE || FBINK_FOR_KOBO
 
 // Same thing for WAIT_FOR_UPDATE_COMPLETE requests...
+#ifndef FBINK_FOR_LINUX
 static int
     wait_for_complete(int fbfd, uint32_t marker)
 {
@@ -3289,7 +3958,9 @@ static int
 #	elif defined(FBINK_FOR_CERVANTES)
 	return wait_for_complete_cervantes(fbfd, marker);
 #	elif defined(FBINK_FOR_KOBO)
-	if (deviceQuirks.isSunxi) {
+	if (deviceQuirks.isMTK) {
+		return wait_for_complete_kobo_mtk(fbfd, marker);
+	} else if (deviceQuirks.isSunxi) {
 		return wait_for_complete_kobo_sunxi(marker);
 	} else if (deviceQuirks.isKoboMk7) {
 		return wait_for_complete_kobo_mk7(fbfd, marker);
@@ -3303,6 +3974,78 @@ static int
 #	endif    // FBINK_FOR_KINDLE
 }
 #endif    // !FBINK_FOR_LINUX
+
+#ifdef FBINK_FOR_KOBO
+// Implementations of the various ways one can poke at the EPDC
+// on NTX kernels in order to wake it up immediately instead of relying on the driver's own PM...
+static int
+    wakeup_epdc_nop(void)
+{
+	return ERRCODE(ENOSYS);
+}
+
+// We know we'll only ever pass string literals to this,
+// and we want to be able to use sizeof to compute the length of the string,
+// so we have to go through a macro instead of an inline function...
+#	define WRITE_TO_SYSFS(value, path)                                                                              \
+		({                                                                                                       \
+			int fd = open(path, O_WRONLY | O_CLOEXEC);                                                       \
+			if (fd == -1) {                                                                                  \
+				PFWARN("open(%s): %m", path);                                                            \
+				return ERRCODE(EXIT_FAILURE);                                                            \
+			}                                                                                                \
+			size_t  bytes = sizeof(value);                                                                   \
+			ssize_t nw    = write(fd, value, bytes);                                                         \
+			if (nw == -1) {                                                                                  \
+				PFWARN("write: %m");                                                                     \
+				return ERRCODE(EXIT_FAILURE);                                                            \
+			}                                                                                                \
+			close(fd);                                                                                       \
+                                                                                                                         \
+			if ((size_t) nw == bytes) {                                                                      \
+				return EXIT_SUCCESS;                                                                     \
+			} else {                                                                                         \
+				return ERRCODE(EXIT_FAILURE);                                                            \
+			}                                                                                                \
+		})
+
+static int
+    wakeup_epdc_kobo_nxp(void)
+{
+	// c.f., power_state_write @ drivers/video/fbdev/mxc/mxc_epdc_fake_s1d13522.c
+	WRITE_TO_SYSFS("1,0", NTX_NXP_EPDC_POWER);
+}
+
+static int
+    wakeup_epdc_kobo_sunxi(void)
+{
+	// c.f., dispdbg_process @ drivers/video/fbdev/sunxi/disp2/disp/dev_disp_debugfs.c
+	WRITE_TO_SYSFS("lcd0", "/sys/kernel/debug/dispdbg/name");
+	WRITE_TO_SYSFS("enable", "/sys/kernel/debug/dispdbg/command");
+	WRITE_TO_SYSFS("1", "/sys/kernel/debug/dispdbg/start");
+}
+
+static int
+    wakeup_epdc_kobo_mtk(void)
+{
+	// c.f., debug_fiti_power_control @ drivers/misc/mediatek/hwtcon/hwtcon_debug.c
+	WRITE_TO_SYSFS("fiti_power 1", "/proc/hwtcon/cmd");
+}
+#endif    // FBINK_FOR_KOBO
+
+// And the public API call for that mess
+int
+    fbink_wakeup_epdc(void)
+{
+#ifndef FBINK_FOR_KOBO
+	// Abort silently, this thing is niche enough already...
+	return ERRCODE(ENOSYS);
+#else
+	// We go through a function pointer instead of an if ladder because the NXP implementation is only available on the latest devices,
+	// so to keep things simple, we want to handle that check during fbink_init...
+	return (*fxpWakeupEpdc)();
+#endif
+}
 
 static inline __attribute__((always_inline)) const char*
     get_fbdev_path(void)
@@ -3322,10 +4065,8 @@ static inline __attribute__((always_inline)) const char*
 int
     fbink_open(void)
 {
-	int fbfd = -1;
-
 	// Open the framebuffer file for reading and writing
-	fbfd = open(get_fbdev_path(), O_RDWR | O_CLOEXEC);
+	int fbfd = open(get_fbdev_path(), O_RDWR | O_CLOEXEC);
 	if (fbfd == -1) {
 		PFWARN("Cannot open framebuffer character device: %m");
 		return ERRCODE(EXIT_FAILURE);
@@ -3416,6 +4157,37 @@ static __attribute__((cold)) const char*
 			return "Upside Down, 180°";
 		case FB_ROTATE_CCW:
 			return "Counter Clockwise, 270°";
+		default:
+			return "Unknown?!";
+	}
+}
+
+static __attribute__((cold)) const char*
+    fb_pixfmt_to_string(FBINK_PXFMT_INDEX_E fmt)
+{
+	switch (fmt) {
+		case FBINK_PXFMT_UNKNOWN:
+			return "Unknown";
+		case FBINK_PXFMT_Y4:
+			return "Y4";
+		case FBINK_PXFMT_Y8:
+			return "Y8";
+		case FBINK_PXFMT_BGR565:
+			return "BGR565";
+		case FBINK_PXFMT_RGB565:
+			return "RGB565";
+		case FBINK_PXFMT_BGR24:
+			return "BGR24";
+		case FBINK_PXFMT_RGB24:
+			return "RGB24";
+		case FBINK_PXFMT_BGRA:
+			return "BGRA";
+		case FBINK_PXFMT_RGBA:
+			return "RGBA";
+		case FBINK_PXFMT_BGR32:
+			return "BGR32";
+		case FBINK_PXFMT_RGB32:
+			return "RGB32";
 		default:
 			return "Unknown?!";
 	}
@@ -3537,87 +4309,18 @@ static __attribute__((cold)) int
 #	endif
 
 	// Pack the pen colors into the appropriate pixel format...
-	switch (vInfo.bits_per_pixel) {
-		case 4U:
-			if (is_fg) {
-				penFGPixel.gray8 = penFGColor;
-			} else {
-				penBGPixel.gray8 = penBGColor;
-			}
-			break;
-		case 8U:
-			if (is_fg) {
-				penFGPixel.gray8 = penFGColor;
-			} else {
-				penBGPixel.gray8 = penBGColor;
-			}
-			break;
-		case 16U:
-			if (is_fg) {
-				if (is_y8) {
-					penFGPixel.rgb565 = pack_rgb565(penFGColor, penFGColor, penFGColor);
-				} else {
-					penFGPixel.rgb565 = pack_rgb565(r, g, b);
-				}
-			} else {
-				if (is_y8) {
-					penBGPixel.rgb565 = pack_rgb565(penBGColor, penBGColor, penBGColor);
-				} else {
-					penBGPixel.rgb565 = pack_rgb565(r, g, b);
-				}
-			}
-			break;
-		case 24U:
-			if (is_fg) {
-				if (is_y8) {
-					penFGPixel.bgra.color.r = penFGPixel.bgra.color.g = penFGPixel.bgra.color.b =
-					    penFGColor;
-				} else {
-					penFGPixel.bgra.color.r = r;
-					penFGPixel.bgra.color.g = g;
-					penFGPixel.bgra.color.b = b;
-				}
-			} else {
-				if (is_y8) {
-					penBGPixel.bgra.color.r = penBGPixel.bgra.color.g = penBGPixel.bgra.color.b =
-					    penBGColor;
-				} else {
-					penBGPixel.bgra.color.r = r;
-					penBGPixel.bgra.color.g = g;
-					penBGPixel.bgra.color.b = b;
-				}
-			}
-			break;
-		case 32U:
-			if (is_fg) {
-				if (is_y8) {
-					penFGPixel.bgra.color.a = 0xFFu;
-					penFGPixel.bgra.color.r = penFGPixel.bgra.color.g = penFGPixel.bgra.color.b =
-					    penFGColor;
-				} else {
-					penFGPixel.bgra.color.r = r;
-					penFGPixel.bgra.color.g = g;
-					penFGPixel.bgra.color.b = b;
-					penFGPixel.bgra.color.a = a;
-				}
-			} else {
-				if (is_y8) {
-					penBGPixel.bgra.color.a = 0xFFu;
-					penBGPixel.bgra.color.r = penBGPixel.bgra.color.g = penBGPixel.bgra.color.b =
-					    penBGColor;
-				} else {
-					penBGPixel.bgra.color.r = r;
-					penBGPixel.bgra.color.g = g;
-					penBGPixel.bgra.color.b = b;
-					penBGPixel.bgra.color.a = a;
-				}
-			}
-			break;
-		default:
-			// Huh oh... Should never happen!
-			WARN("Unsupported framebuffer bpp");
-			rv = ERRCODE(EXIT_FAILURE);
-			break;
+	if (is_y8) {
+		if (is_fg) {
+			penFGPixel = pack_pixel_from_y8(penFGColor);
+		} else {
+			penBGPixel = pack_pixel_from_y8(penBGColor);
+		}
+	} else {
+		if (is_fg) {
+			penFGPixel = pack_pixel_from_rgba(r, g, b, a);
+		} else {
+			penBGPixel = pack_pixel_from_rgba(r, g, b, a);
+		}
 	}
 
 	return rv;
@@ -3724,35 +4427,8 @@ static __attribute__((cold)) int
 #	endif
 
 	// Pack the pen colors into the appropriate pixel format...
-	switch (vInfo.bits_per_pixel) {
-		case 4U:
-			penFGPixel.gray8 = penFGColor;
-			penBGPixel.gray8 = penBGColor;
-			break;
-		case 8U:
-			penFGPixel.gray8 = penFGColor;
-			penBGPixel.gray8 = penBGColor;
-			break;
-		case 16U:
-			penFGPixel.rgb565 = pack_rgb565(penFGColor, penFGColor, penFGColor);
-			penBGPixel.rgb565 = pack_rgb565(penBGColor, penBGColor, penBGColor);
-			break;
-		case 24U:
-			penFGPixel.bgra.color.r = penFGPixel.bgra.color.g = penFGPixel.bgra.color.b = penFGColor;
-			penBGPixel.bgra.color.r = penBGPixel.bgra.color.g = penBGPixel.bgra.color.b = penBGColor;
-			break;
-		case 32U:
-			penFGPixel.bgra.color.a = 0xFFu;
-			penFGPixel.bgra.color.r = penFGPixel.bgra.color.g = penFGPixel.bgra.color.b = penFGColor;
-			penBGPixel.bgra.color.a                                                     = 0xFFu;
-			penBGPixel.bgra.color.r = penBGPixel.bgra.color.g = penBGPixel.bgra.color.b = penBGColor;
-			break;
-		default:
-			// Huh oh... Should never happen!
-			WARN("Unsupported framebuffer bpp");
-			rv = ERRCODE(EXIT_FAILURE);
-			break;
-	}
+	penFGPixel = pack_pixel_from_y8(penFGColor);
+	penBGPixel = pack_pixel_from_y8(penBGColor);
 
 	return rv;
 }
@@ -3834,9 +4510,23 @@ static __attribute__((cold)) void
 		}
 	}
 
-	if (deviceQuirks.deviceId == DEVICE_POCKETBOOK_COLOR_LUX) {
+	if (deviceQuirks.hasColorPanel) {
+		// They all use a 24bpp RGB framebuffer, despite potentially reporting it as 8bpp...
 		vInfo.bits_per_pixel = 24U;
-		vInfo.xres           = vInfo.xres / 3U;
+		// Enforce RGB24
+		vInfo.red.offset     = 0U << 3U;
+		vInfo.red.length     = 8U;
+		vInfo.green.offset   = 1U << 3U;
+		vInfo.green.length   = 8U;
+		vInfo.blue.offset    = 2U << 3U;
+		vInfo.blue.length    = 8U;
+		vInfo.transp.offset  = 0U;
+		vInfo.transp.length  = 0U;
+	}
+
+	// In addition to the above, the first color device was extra quirky...
+	if (deviceQuirks.deviceId == DEVICE_POCKETBOOK_COLOR_LUX) {
+		vInfo.xres = vInfo.xres / 3U;
 	}
 }
 #endif    // FBINK_FOR_POCKETBOOK
@@ -3924,7 +4614,7 @@ static __attribute__((cold)) void
 }
 
 static __attribute__((cold)) const char*
-    sunxi_force_rota_to_string(SUNXI_FORCE_ROTA_INDEX_T mode)
+    sunxi_force_rota_to_string(SUNXI_FORCE_ROTA_INDEX_E mode)
 {
 	switch (mode) {
 		case FORCE_ROTA_CURRENT_ROTA:
@@ -3975,8 +4665,12 @@ static __attribute__((cold)) int
 		// Identify the device's specific model...
 		identify_device();
 #	if defined(FBINK_FOR_KINDLE)
+		// Most kindle support the WAIT_FOR_UPDATE_SUBMISSION ioctl...
+		deviceQuirks.canWaitForSubmission = true;
 		if (deviceQuirks.isKindleLegacy) {
 			ELOG("Enabled Legacy einkfb Kindle quirks");
+			// ... as long as they're not really old devices ;).
+			deviceQuirks.canWaitForSubmission = false;
 		} else if (deviceQuirks.isKindlePearlScreen) {
 			ELOG("Enabled Kindle with Pearl screen quirks");
 		} else if (deviceQuirks.isKindleZelda) {
@@ -3985,10 +4679,18 @@ static __attribute__((cold)) int
 			ELOG("Enabled Kindle Rex platform quirks");
 		}
 #	elif defined(FBINK_FOR_KOBO)
+		// Being able to poke at the EPDC PM is roughly a Mk.8+ thing...
+		fxpWakeupEpdc = &wakeup_epdc_nop;
+
 		if (deviceQuirks.isKoboNonMT) {
 			ELOG("Enabled Kobo w/o Multi-Touch quirks");
 		} else if (deviceQuirks.isKoboMk7) {
 			ELOG("Enabled Kobo Mark 7 quirks");
+
+			// This is only available on the latest boards (ca. Mk.8 and up)
+			if (access(NTX_NXP_EPDC_POWER, F_OK) == 0) {
+				fxpWakeupEpdc = &wakeup_epdc_kobo_nxp;
+			}
 		} else if (deviceQuirks.isSunxi) {
 			ELOG("Enabled sunxi quirks");
 
@@ -4073,6 +4775,21 @@ static __attribute__((cold)) int
 					sunxiCtx.force_rota = FORCE_ROTA_UR;
 				}
 			}
+
+			fxpWakeupEpdc = &wakeup_epdc_kobo_sunxi;
+		} else if (deviceQuirks.isMTK) {
+			ELOG("Enabled MediaTek quirks");
+
+			deviceQuirks.canWaitForSubmission = true;
+			fxpWakeupEpdc                     = &wakeup_epdc_kobo_mtk;
+		}
+
+		// Make it obvious if the feature isn't available (this should pretty much *exactly* match anything < Mk. 8)
+		if (fxpWakeupEpdc == &wakeup_epdc_nop) {
+			ELOG("Explicit EPDC wakeup isn't supported on this device");
+			deviceQuirks.canWakeEPDC = false;
+		} else {
+			deviceQuirks.canWakeEPDC = true;
 		}
 #	elif defined(FBINK_FOR_POCKETBOOK)
 		// Check if the device is running on an AllWinner SoC instead of an NXP one...
@@ -4115,6 +4832,11 @@ static __attribute__((cold)) int
 			ELOG("Unable to query clock tick frequency, assuming %ld Hz", USER_HZ);
 		}
 
+		// Support user override, could come in handy on platforms with potentially shakey device identification (e.g., no InkView PB).
+		const char* dpi_override = getenv("FBINK_FORCE_DPI");
+		if (dpi_override) {
+			deviceQuirks.screenDPI = (unsigned short) strtoul(dpi_override, NULL, 10);
+		}
 		// Much like KOReader, assume a baseline DPI for devices where we don't specify a value in device_id
 		if (deviceQuirks.screenDPI == 0U) {
 #ifdef FBINK_FOR_LINUX
@@ -4125,7 +4847,7 @@ static __attribute__((cold)) int
 			deviceQuirks.screenDPI = 167U;
 #endif
 		}
-		ELOG("Screen density set to %hu dpi", deviceQuirks.screenDPI);
+		ELOG("Screen density set to %hu dpi%s", deviceQuirks.screenDPI, dpi_override ? " (override)" : "");
 
 		// And make sure we won't do that again ;).
 		deviceQuirks.skipId = true;
@@ -4335,8 +5057,8 @@ static __attribute__((cold)) int
 		sunxiCtx.layer.info.fb.crop.y        = 0;
 		// Don't ask me why this needs to be shifted 32 bits to the left... ¯\_(ツ)_/¯
 		// NOTE: I managed to bork it during the KOReader port and it appeared to behave fine *without* the shift...
-		sunxiCtx.layer.info.fb.crop.width    = (uint64_t) vInfo.xres << 32U;
-		sunxiCtx.layer.info.fb.crop.height   = (uint64_t) vInfo.yres << 32U;
+		sunxiCtx.layer.info.fb.crop.width    = (long long int) vInfo.xres << 32;
+		sunxiCtx.layer.info.fb.crop.height   = (long long int) vInfo.yres << 32;
 		sunxiCtx.layer.info.fb.flags         = DISP_BF_NORMAL;
 		sunxiCtx.layer.info.fb.scan          = DISP_SCAN_PROGRESSIVE;
 		sunxiCtx.layer.info.fb.eotf          = DISP_EOTF_GAMMA22;    // SDR
@@ -4439,8 +5161,8 @@ static __attribute__((cold)) int
 	//       sanely, but for now, we only want to deal with the default rotation properly...
 	if (!getenv("FBINK_NO_SW_ROTA")) {
 		if (vInfo.xres > vInfo.yres) {
-			screenWidth = vInfo.yres;
-			screenHeight = vInfo.xres;
+			screenWidth     = vInfo.yres;
+			screenHeight    = vInfo.xres;
 			fxpRotateCoords = &rotate_coordinates_pickel;
 			fxpRotateRegion = &rotate_region_pickel;
 			ELOG("Enabled PocketBook rotation quirks (%ux%u -> %ux%u)",
@@ -4451,9 +5173,9 @@ static __attribute__((cold)) int
 		}
 	}
 
-	viewWidth = screenWidth;
+	viewWidth      = screenWidth;
 	viewHoriOrigin = 0U;
-	viewHeight = screenHeight;
+	viewHeight     = screenHeight;
 	viewVertOrigin = 0U;
 #else
 	// Other devices are generally never broken-by-design (at least not on that front ;))
@@ -4632,8 +5354,8 @@ static __attribute__((cold)) int
 	}
 #	else
 	// Default font is IBM
-	glyphWidth = 8U;
-	glyphHeight = 8U;
+	glyphWidth         = 8U;
+	glyphHeight        = 8U;
 	fxpFont8xGetBitmap = &font8x8_get_bitmap;
 
 	if (fbink_cfg->fontname != IBM) {
@@ -4754,39 +5476,99 @@ static __attribute__((cold)) int
 	// we'll special-case the image codepath to ignore it when row is unspecified (i.e., 0) ;).
 	viewVertOrigin = (uint8_t) (viewVertOrigin + viewVertOffset);
 
-#ifdef FBINK_WITH_DRAW
-	// Pack the pen colors into the right pixel format...
-	if (update_pen_colors(fbink_cfg) != EXIT_SUCCESS) {
-		goto cleanup;
-	}
-
-	// Use the appropriate get/put pixel functions...
+	// Compute the pixel format
 	switch (vInfo.bits_per_pixel) {
 		case 4U:
+			deviceQuirks.pixelFormat = FBINK_PXFMT_Y4;
+			break;
+		case 8U:
+			deviceQuirks.pixelFormat = FBINK_PXFMT_Y8;
+			break;
+		case 16U:
+			if (vInfo.red.offset == 0U) {
+				deviceQuirks.pixelFormat = FBINK_PXFMT_RGB565;
+				deviceQuirks.isRGB       = true;
+			} else {
+				deviceQuirks.pixelFormat = FBINK_PXFMT_BGR565;
+			}
+			break;
+		case 24U:
+			if (vInfo.red.offset == 0U) {
+				deviceQuirks.pixelFormat = FBINK_PXFMT_RGB24;
+				deviceQuirks.isRGB       = true;
+			} else {
+				deviceQuirks.pixelFormat = FBINK_PXFMT_BGR24;
+			}
+			break;
+		case 32U:
+			if (vInfo.transp.length == 0U) {
+				if (vInfo.red.offset == 0U) {
+					deviceQuirks.pixelFormat = FBINK_PXFMT_RGB32;
+					deviceQuirks.isRGB       = true;
+				} else {
+					deviceQuirks.pixelFormat = FBINK_PXFMT_BGR32;
+				}
+			} else {
+				if (vInfo.red.offset == 0U) {
+					deviceQuirks.pixelFormat = FBINK_PXFMT_RGBA;
+					deviceQuirks.isRGB       = true;
+				} else {
+					deviceQuirks.pixelFormat = FBINK_PXFMT_BGRA;
+				}
+			}
+			break;
+		default:
+			// Huh oh... Should never happen!
+			WARN("Unsupported framebuffer bitdepth");
+			rv = ERRCODE(EXIT_FAILURE);
+			goto cleanup;
+			break;
+	}
+	ELOG("Framebuffer pixel format: %s", fb_pixfmt_to_string(deviceQuirks.pixelFormat));
+
+#ifdef FBINK_WITH_DRAW
+	// Use the appropriate get/put pixel functions...
+	switch (deviceQuirks.pixelFormat) {
+		case FBINK_PXFMT_Y4:
 			//fxpPutPixel = &put_pixel_Gray4;
 			fxpGetPixel        = &get_pixel_Gray4;
 			fxpFillRect        = &fill_rect_Gray4;
 			fxpFillRectChecked = &fill_rect_Gray4_checked;
 			break;
-		case 8U:
+		case FBINK_PXFMT_Y8:
 			//fxpPutPixel = &put_pixel_Gray8;
 			fxpGetPixel        = &get_pixel_Gray8;
 			fxpFillRect        = &fill_rect_Gray8;
 			fxpFillRectChecked = &fill_rect_Gray8_checked;
 			break;
-		case 16U:
+		case FBINK_PXFMT_BGR565:
+			//fxpPutPixel = &put_pixel_RGB565;
+			fxpGetPixel        = &get_pixel_BGR565;
+			fxpFillRect        = &fill_rect_RGB565;
+			fxpFillRectChecked = &fill_rect_RGB565_checked;
+			break;
+		case FBINK_PXFMT_RGB565:
 			//fxpPutPixel = &put_pixel_RGB565;
 			fxpGetPixel        = &get_pixel_RGB565;
 			fxpFillRect        = &fill_rect_RGB565;
 			fxpFillRectChecked = &fill_rect_RGB565_checked;
 			break;
-		case 24U:
+		case FBINK_PXFMT_BGR24:
+			//fxpPutPixel = &put_pixel_BGR24;
+			fxpGetPixel        = &get_pixel_BGR24;
+			fxpFillRect        = &fill_rect_RGB24;
+			fxpFillRectChecked = &fill_rect_RGB24_checked;
+			break;
+		case FBINK_PXFMT_RGB24:
 			//fxpPutPixel = &put_pixel_RGB24;
 			fxpGetPixel        = &get_pixel_RGB24;
 			fxpFillRect        = &fill_rect_RGB24;
 			fxpFillRectChecked = &fill_rect_RGB24_checked;
 			break;
-		case 32U:
+		case FBINK_PXFMT_BGRA:
+		case FBINK_PXFMT_RGBA:
+		case FBINK_PXFMT_BGR32:
+		case FBINK_PXFMT_RGB32:
 			//fxpPutPixel = &put_pixel_RGB32;
 			fxpGetPixel        = &get_pixel_RGB32;
 			fxpFillRect        = &fill_rect_RGB32;
@@ -4794,10 +5576,16 @@ static __attribute__((cold)) int
 			break;
 		default:
 			// Huh oh... Should never happen!
-			WARN("Unsupported framebuffer bpp");
+			WARN("Unsupported framebuffer pixel format");
 			rv = ERRCODE(EXIT_FAILURE);
 			goto cleanup;
 			break;
+	}
+
+	// Pack the pen colors into the right pixel format...
+	// NOTE: This *will* enforce grayscale, unlike fbink_set_fg/bg_pen_*!
+	if (update_pen_colors(fbink_cfg) != EXIT_SUCCESS) {
+		goto cleanup;
 	}
 #endif    // FBINK_WITH_DRAW
 
@@ -4822,7 +5610,7 @@ int
 
 #ifdef FBINK_WITH_OPENTYPE
 static __attribute__((cold)) const char*
-    font_style_to_string(FONT_STYLE_T style)
+    font_style_to_string(FONT_STYLE_E style)
 {
 	switch (style) {
 		case FNT_REGULAR:
@@ -5085,8 +5873,10 @@ void
 {
 	fprintf(
 	    stdout,
-	    "FBINK_VERSION='%s';viewWidth=%u;viewHeight=%u;screenWidth=%u;screenHeight=%u;viewHoriOrigin=%hhu;viewVertOrigin=%hhu;viewVertOffset=%hhu;DPI=%hu;BPP=%u;lineLength=%u;invertedGrayscale=%d;FONTW=%hu;FONTH=%hu;FONTSIZE_MULT=%hhu;FONTNAME='%s';glyphWidth=%hhu;glyphHeight=%hhu;MAXCOLS=%hu;MAXROWS=%hu;isPerfectFit=%d;FBID='%s';USER_HZ=%ld;penFGColor=%hhu;penBGColor=%hhu;deviceName='%s';deviceId=%hu;deviceCodename='%s';devicePlatform='%s';isSunxi=%d;SunxiHasFBDamage=%d;SunxiForceRota=%d;isKindleLegacy=%d;isKindleMTK=%d;isKoboNonMT=%d;unreliableWaitFor=%d;ntxBootRota=%hhu;ntxRotaQuirk=%hhu;isNTX16bLandscape=%d;currentRota=%u;canRotate=%d;canHWInvert=%d;hasEclipseWfm=%d;",
+	    "FBINK_VERSION='%s';FBINK_TARGET=%hhu;FBINK_FEATURES=%#x;viewWidth=%u;viewHeight=%u;screenWidth=%u;screenHeight=%u;viewHoriOrigin=%hhu;viewVertOrigin=%hhu;viewVertOffset=%hhu;DPI=%hu;BPP=%u;lineLength=%u;invertedGrayscale=%d;FONTW=%hu;FONTH=%hu;FONTSIZE_MULT=%hhu;FONTNAME='%s';glyphWidth=%hhu;glyphHeight=%hhu;MAXCOLS=%hu;MAXROWS=%hu;isPerfectFit=%d;FBID='%s';USER_HZ=%ld;penFGColor=%hhu;penBGColor=%hhu;deviceName='%s';deviceId=%hu;deviceCodename='%s';devicePlatform='%s';isMTK=%d;isSunxi=%d;isTolino=%d;SunxiHasFBDamage=%d;SunxiForceRota=%d;isKindleLegacy=%d;isKoboNonMT=%d;unreliableWaitFor=%d;canWakeEPDC=%d;ntxBootRota=%hhu;ntxRotaQuirk=%hhu;rotationMap='{ %hhu, %hhu, %hhu, %hhu }';touchSwapAxes=%d;touchMirrorX=%d;touchMirrorY=%d;isNTX16bLandscape=%d;currentRota=%u;canRotate=%d;canHWInvert=%d;hasEclipseWfm=%d;hasColorPanel=%d;pixelFormat='%s';canWaitForSubmission=%d;",
 	    fbink_version(),
+	    fbink_target(),
+	    fbink_features(),
 	    viewWidth,
 	    viewHeight,
 	    screenWidth,
@@ -5115,8 +5905,10 @@ void
 	    deviceQuirks.deviceId,
 	    deviceQuirks.deviceCodename,
 	    deviceQuirks.devicePlatform,
+	    deviceQuirks.isMTK,
 	    deviceQuirks.isSunxi,
 #if defined(FBINK_FOR_KOBO)
+	    deviceQuirks.isTolino,
 	    sunxiCtx.has_fbdamage,
 	    sunxiCtx.force_rota,
 #else
@@ -5124,74 +5916,87 @@ void
 	    FORCE_ROTA_NOTSUP,
 #endif
 	    deviceQuirks.isKindleLegacy,
-	    deviceQuirks.isKindleMTK,
 	    deviceQuirks.isKoboNonMT,
 	    deviceQuirks.unreliableWaitFor,
+	    deviceQuirks.canWakeEPDC,
 	    deviceQuirks.ntxBootRota,
 	    deviceQuirks.ntxRotaQuirk,
+	    deviceQuirks.rotationMap[FB_ROTATE_UR],
+	    deviceQuirks.rotationMap[FB_ROTATE_CW],
+	    deviceQuirks.rotationMap[FB_ROTATE_UD],
+	    deviceQuirks.rotationMap[FB_ROTATE_CCW],
+	    deviceQuirks.touchSwapAxes,
+	    deviceQuirks.touchMirrorX,
+	    deviceQuirks.touchMirrorY,
 	    deviceQuirks.isNTX16bLandscape,
 	    vInfo.rotate,
 	    deviceQuirks.canRotate,
 	    deviceQuirks.canHWInvert,
-	    deviceQuirks.hasEclipseWfm);
+	    deviceQuirks.hasEclipseWfm,
+	    deviceQuirks.hasColorPanel,
+	    fb_pixfmt_to_string(deviceQuirks.pixelFormat),
+	    deviceQuirks.canWaitForSubmission);
 }
 
 // Dump a few of our internal state variables to the FBInkState struct pointed to by fbink_state
 void
     fbink_get_state(const FBInkConfig* restrict fbink_cfg, FBInkState* restrict fbink_state)
 {
-	if (fbink_state) {
-		fbink_state->user_hz         = USER_HZ;
-		fbink_state->font_name       = fontname_to_string(fbink_cfg->fontname);
-		fbink_state->view_width      = viewWidth;
-		fbink_state->view_height     = viewHeight;
-		fbink_state->screen_width    = screenWidth;
-		fbink_state->screen_height   = screenHeight;
-		fbink_state->scanline_stride = fInfo.line_length;
-		fbink_state->bpp             = vInfo.bits_per_pixel;
-		fbink_state->inverted_grayscale =
-		    !!(vInfo.bits_per_pixel == 8U && vInfo.grayscale == GRAYSCALE_8BIT_INVERTED);
-		strncpy(fbink_state->device_name, deviceQuirks.deviceName, sizeof(fbink_state->device_name) - 1U);
-		strncpy(
-		    fbink_state->device_codename, deviceQuirks.deviceCodename, sizeof(fbink_state->device_codename) - 1U);
-		strncpy(
-		    fbink_state->device_platform, deviceQuirks.devicePlatform, sizeof(fbink_state->device_platform) - 1U);
-		fbink_state->device_id        = deviceQuirks.deviceId;
-		fbink_state->pen_fg_color     = penFGColor;
-		fbink_state->pen_bg_color     = penBGColor;
-		fbink_state->screen_dpi       = deviceQuirks.screenDPI;
-		fbink_state->font_w           = FONTW;
-		fbink_state->font_h           = FONTH;
-		fbink_state->max_cols         = MAXCOLS;
-		fbink_state->max_rows         = MAXROWS;
-		fbink_state->view_hori_origin = viewHoriOrigin;
-		fbink_state->view_vert_origin = viewVertOrigin;
-		fbink_state->view_vert_offset = viewVertOffset;
-		fbink_state->fontsize_mult    = FONTSIZE_MULT;
-		fbink_state->glyph_width      = glyphWidth;
-		fbink_state->glyph_height     = glyphHeight;
-		fbink_state->is_perfect_fit   = deviceQuirks.isPerfectFit;
-		fbink_state->is_sunxi         = deviceQuirks.isSunxi;
+	fbink_state->user_hz            = USER_HZ;
+	fbink_state->font_name          = fontname_to_string(fbink_cfg->fontname);
+	fbink_state->view_width         = viewWidth;
+	fbink_state->view_height        = viewHeight;
+	fbink_state->screen_width       = screenWidth;
+	fbink_state->screen_height      = screenHeight;
+	fbink_state->scanline_stride    = fInfo.line_length;
+	fbink_state->bpp                = vInfo.bits_per_pixel;
+	fbink_state->inverted_grayscale = !!(vInfo.bits_per_pixel == 8U && vInfo.grayscale == GRAYSCALE_8BIT_INVERTED);
+	strcpy(fbink_state->device_name, deviceQuirks.deviceName);
+	strcpy(fbink_state->device_codename, deviceQuirks.deviceCodename);
+	strcpy(fbink_state->device_platform, deviceQuirks.devicePlatform);
+	fbink_state->device_id        = deviceQuirks.deviceId;
+	fbink_state->pen_fg_color     = penFGColor;
+	fbink_state->pen_bg_color     = penBGColor;
+	fbink_state->screen_dpi       = deviceQuirks.screenDPI;
+	fbink_state->font_w           = FONTW;
+	fbink_state->font_h           = FONTH;
+	fbink_state->max_cols         = MAXCOLS;
+	fbink_state->max_rows         = MAXROWS;
+	fbink_state->view_hori_origin = viewHoriOrigin;
+	fbink_state->view_vert_origin = viewVertOrigin;
+	fbink_state->view_vert_offset = viewVertOffset;
+	fbink_state->fontsize_mult    = FONTSIZE_MULT;
+	fbink_state->glyph_width      = glyphWidth;
+	fbink_state->glyph_height     = glyphHeight;
+	fbink_state->is_perfect_fit   = deviceQuirks.isPerfectFit;
+	fbink_state->is_mtk           = deviceQuirks.isMTK;
+	fbink_state->is_sunxi         = deviceQuirks.isSunxi;
 #if defined(FBINK_FOR_KOBO)
-		fbink_state->sunxi_has_fbdamage = sunxiCtx.has_fbdamage;
-		fbink_state->sunxi_force_rota   = sunxiCtx.force_rota;
+	fbink_state->is_tolino          = deviceQuirks.isTolino;
+	fbink_state->sunxi_has_fbdamage = sunxiCtx.has_fbdamage;
+	fbink_state->sunxi_force_rota   = sunxiCtx.force_rota;
 #else
-		fbink_state->sunxi_has_fbdamage = false;
-		fbink_state->sunxi_force_rota = FORCE_ROTA_NOTSUP;
+	fbink_state->sunxi_has_fbdamage = false;
+	fbink_state->sunxi_force_rota   = FORCE_ROTA_NOTSUP;
 #endif
-		fbink_state->is_kindle_legacy        = deviceQuirks.isKindleLegacy;
-		fbink_state->is_kindle_mtk           = deviceQuirks.isKindleMTK;
-		fbink_state->is_kobo_non_mt          = deviceQuirks.isKoboNonMT;
-		fbink_state->unreliable_wait_for     = deviceQuirks.unreliableWaitFor;
-		fbink_state->ntx_boot_rota           = deviceQuirks.ntxBootRota;
-		fbink_state->ntx_rota_quirk          = deviceQuirks.ntxRotaQuirk;
-		fbink_state->is_ntx_quirky_landscape = deviceQuirks.isNTX16bLandscape;
-		fbink_state->current_rota            = (uint8_t) vInfo.rotate;
-		fbink_state->can_rotate              = deviceQuirks.canRotate;
-		fbink_state->can_hw_invert           = deviceQuirks.canHWInvert;
-	} else {
-		WARN("Err, it appears we were passed a NULL fbink_state pointer?");
-	}
+	fbink_state->is_kindle_legacy    = deviceQuirks.isKindleLegacy;
+	fbink_state->is_kobo_non_mt      = deviceQuirks.isKoboNonMT;
+	fbink_state->unreliable_wait_for = deviceQuirks.unreliableWaitFor;
+	fbink_state->can_wake_epdc       = deviceQuirks.canWakeEPDC;
+	fbink_state->ntx_boot_rota       = deviceQuirks.ntxBootRota;
+	fbink_state->ntx_rota_quirk      = deviceQuirks.ntxRotaQuirk;
+	memcpy(fbink_state->rotation_map, deviceQuirks.rotationMap, sizeof(deviceQuirks.rotationMap));
+	fbink_state->touch_swap_axes         = deviceQuirks.touchSwapAxes;
+	fbink_state->touch_mirror_x          = deviceQuirks.touchMirrorX;
+	fbink_state->touch_mirror_y          = deviceQuirks.touchMirrorY;
+	fbink_state->is_ntx_quirky_landscape = deviceQuirks.isNTX16bLandscape;
+	fbink_state->current_rota            = (uint8_t) vInfo.rotate;
+	fbink_state->can_rotate              = deviceQuirks.canRotate;
+	fbink_state->can_hw_invert           = deviceQuirks.canHWInvert;
+	fbink_state->has_eclipse_wfm         = deviceQuirks.hasEclipseWfm;
+	fbink_state->has_color_panel         = deviceQuirks.hasColorPanel;
+	fbink_state->pixel_format            = deviceQuirks.pixelFormat;
+	fbink_state->can_wait_for_submission = deviceQuirks.canWaitForSubmission;
 }
 
 // Memory map the framebuffer
@@ -5229,7 +6034,7 @@ static int
 static void
     yield_to_sunxi_disp(void)
 {
-	const struct timespec zzz = { 0L, 50000000L };    // 50ms
+	const struct timespec zzz = { 0L, 50 * 1e+6 };    // 50ms
 	nanosleep(&zzz, NULL);
 }
 
@@ -5521,14 +6326,15 @@ static void
 	region->height = vInfo.yres;
 }
 
-// Do a full-screen clear, eInk refresh included
-int
-    fbink_cls(int fbfd                              UNUSED_BY_NODRAW,
-	      const FBInkConfig* restrict fbink_cfg UNUSED_BY_NODRAW,
-	      const FBInkRect* restrict rect        UNUSED_BY_NODRAW,
-	      bool no_rota                          UNUSED_BY_NODRAW)
-{
 #ifdef FBINK_WITH_DRAW
+// Helper function to allow exporting fxpFillRectChecked as a public API in slightly less convoluted ways than simply via fbink_cls ;).
+static int
+    fill_rect(int fbfd,
+	      const FBInkConfig* restrict fbink_cfg,
+	      const FBInkRect* restrict rect,
+	      const FBInkPixel* restrict c,
+	      bool no_rota)
+{
 	// If we open a fd now, we'll only keep it open for this single call!
 	// NOTE: We *expect* to be initialized at this point, though, but that's on the caller's hands!
 	bool keep_fd = true;
@@ -5556,11 +6362,17 @@ int
 	// We'll need a matching region for the refresh...
 	struct mxcfb_rect region = { 0U };
 
+	// Handle inversion, if necessary...
+	FBInkPixel px = *c;
+	if (fbink_cfg->is_inverted) {
+		px.p ^= 0x00FFFFFFu;
+	}
+
 	// Did we request a regional clear?
 	bool full_clear = false;
 	if (!rect || (rect->width == 0U || rect->height == 0U)) {
-		// Nope -> full-screen
-		clear_screen(fbfd, fbink_cfg->is_inverted ? penBGColor ^ 0xFFu : penBGColor, fbink_cfg->is_flashing);
+		// Nope -> full-screen.
+		clear_screen(fbfd, &px, fbink_cfg->is_flashing);
 		full_clear    = true;
 		// Set a region for set_last_rect...
 		region.top    = 0U;
@@ -5568,18 +6380,8 @@ int
 		region.width  = screenWidth;
 		region.height = screenHeight;
 	} else {
-		// Yes -> simply fill a rectangle w/ the bg color
-		FBInkPixel bgP = penBGPixel;
-		if (fbink_cfg->is_inverted) {
-			// NOTE: And, of course, RGB565 is terrible. Inverting the lossy packed value would be even lossier...
-			if (unlikely(vInfo.bits_per_pixel == 16U)) {
-				const uint8_t bgcolor = penBGColor ^ 0xFFu;
-				bgP.rgb565            = pack_rgb565(bgcolor, bgcolor, bgcolor);
-			} else {
-				bgP.bgra.p ^= 0x00FFFFFFu;
-			}
-		}
-		(*fxpFillRectChecked)(rect->left, rect->top, rect->width, rect->height, &bgP);
+		// Yes -> simply fill a rectangle w/ the requested color
+		(*fxpFillRectChecked)(rect->left, rect->top, rect->width, rect->height, &px);
 		// And update the region...
 		region.top    = rect->top;
 		region.left   = rect->left;
@@ -5617,6 +6419,70 @@ cleanup:
 	}
 
 	return rv;
+}
+#endif    // FBINK_WITH_DRAW
+
+// Do a full-screen clear, eInk refresh included
+int
+    fbink_cls(int fbfd                              UNUSED_BY_NODRAW,
+	      const FBInkConfig* restrict fbink_cfg UNUSED_BY_NODRAW,
+	      const FBInkRect* restrict rect        UNUSED_BY_NODRAW,
+	      bool no_rota                          UNUSED_BY_NODRAW)
+{
+#ifdef FBINK_WITH_DRAW
+	return fill_rect(fbfd, fbink_cfg, rect, &penBGPixel, no_rota);
+#else
+	WARN("Drawing primitives are disabled in this FBInk build");
+	return ERRCODE(ENOSYS);
+#endif
+}
+
+// Same, but with user-specified colors
+int
+    fbink_fill_rect_gray(int fbfd                              UNUSED_BY_NODRAW,
+			 const FBInkConfig* restrict fbink_cfg UNUSED_BY_NODRAW,
+			 const FBInkRect* restrict rect        UNUSED_BY_NODRAW,
+			 bool no_rota                          UNUSED_BY_NODRAW,
+			 uint8_t y                             UNUSED_BY_NODRAW)
+{
+#ifdef FBINK_WITH_DRAW
+	const FBInkPixel px = pack_pixel_from_y8(y);
+	return fill_rect(fbfd, fbink_cfg, rect, &px, no_rota);
+#else
+	WARN("Drawing primitives are disabled in this FBInk build");
+	return ERRCODE(ENOSYS);
+#endif
+}
+
+int
+    fbink_fill_rect_rgba(int fbfd                              UNUSED_BY_NODRAW,
+			 const FBInkConfig* restrict fbink_cfg UNUSED_BY_NODRAW,
+			 const FBInkRect* restrict rect        UNUSED_BY_NODRAW,
+			 bool no_rota                          UNUSED_BY_NODRAW,
+			 uint8_t r                             UNUSED_BY_NODRAW,
+			 uint8_t g                             UNUSED_BY_NODRAW,
+			 uint8_t b                             UNUSED_BY_NODRAW,
+			 uint8_t a                             UNUSED_BY_NODRAW)
+{
+#ifdef FBINK_WITH_DRAW
+	const FBInkPixel px = pack_pixel_from_rgba(r, g, b, a);
+	return fill_rect(fbfd, fbink_cfg, rect, &px, no_rota);
+#else
+	WARN("Drawing primitives are disabled in this FBInk build");
+	return ERRCODE(ENOSYS);
+#endif
+}
+
+// Takes a pointer to a pixel packed via fbink_pack_pixel_gray/rgba
+int
+    fbink_fill_rect(int fbfd                              UNUSED_BY_NODRAW,
+		    const FBInkConfig* restrict fbink_cfg UNUSED_BY_NODRAW,
+		    const FBInkRect* restrict rect        UNUSED_BY_NODRAW,
+		    bool no_rota                          UNUSED_BY_NODRAW,
+		    void* px                              UNUSED_BY_NODRAW)
+{
+#ifdef FBINK_WITH_DRAW
+	return fill_rect(fbfd, fbink_cfg, rect, px, no_rota);
 #else
 	WARN("Drawing primitives are disabled in this FBInk build");
 	return ERRCODE(ENOSYS);
@@ -5700,6 +6566,160 @@ cleanup:
 	}
 
 	return rv;
+}
+
+// Inverts a region of the framebuffer. Can be used to help implement nightmode on devices without HW inversion support.
+// NOTE: Unlike fbink_invert_screen, this does *not* trigger a refresh.
+int
+    fbink_invert_rect(int fbfd                       UNUSED_BY_NODRAW,
+		      const FBInkRect* restrict rect UNUSED_BY_NODRAW,
+		      bool no_rota                   UNUSED_BY_NODRAW)
+{
+#ifdef FBINK_WITH_DRAW
+	// If we open a fd now, we'll only keep it open for this single call!
+	// NOTE: We *expect* to be initialized at this point, though, but that's on the caller's hands!
+	bool keep_fd = true;
+	if (open_fb_fd(&fbfd, &keep_fd) != EXIT_SUCCESS) {
+		return ERRCODE(EXIT_FAILURE);
+	}
+
+	// Assume success, until shit happens ;)
+	int rv = EXIT_SUCCESS;
+
+	// mmap fb to user mem
+	if (!isFbMapped) {
+		if (memmap_fb(fbfd) != EXIT_SUCCESS) {
+			rv = ERRCODE(EXIT_FAILURE);
+			goto cleanup;
+		}
+	}
+
+	// We'll need a matching region...
+	struct mxcfb_rect region = { 0U };
+
+	// Did we actually request a rect?
+	bool full_clear = false;
+	if (!rect || (rect->width == 0U || rect->height == 0U)) {
+		full_clear = true;
+		fullscreen_region(&region);
+	} else {
+		region.top    = rect->top;
+		region.left   = rect->left;
+		region.width  = rect->width;
+		region.height = rect->height;
+	}
+
+	// Remember the rect...
+	set_last_rect(&region);
+	// Rotate the region if need be...
+	if (!no_rota) {
+		(*fxpRotateRegion)(&region);
+	}
+
+	// Do the thing...
+	if (full_clear) {
+		// Basically, fbink_invert_screen but without a refresh
+		if (unlikely(vInfo.bits_per_pixel == 16U)) {
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wcast-align"
+			uint16_t* p = (uint16_t*) fbPtr;
+#	pragma GCC diagnostic pop
+			size_t px_count = (size_t) vInfo.xres_virtual * vInfo.yres;
+			while (px_count--) {
+				*p++ ^= 0xFFFFu;
+			}
+		} else if (vInfo.bits_per_pixel == 32U) {
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wcast-align"
+			uint32_t* p = (uint32_t*) fbPtr;
+#	pragma GCC diagnostic pop
+			size_t px_count = (size_t) vInfo.xres_virtual * vInfo.yres;
+			while (px_count--) {
+				*p++ ^= 0x00FFFFFFu;
+			}
+		} else {
+			// Byte per byte should do the trick for the other bitdepths
+			uint8_t* p          = fbPtr;
+			size_t   byte_count = (size_t) fInfo.line_length * vInfo.yres;
+			while (byte_count--) {
+				*p++ ^= 0xFFu;
+			}
+		}
+	} else {
+		// Based on their fill_rect counterparts
+		if (unlikely(vInfo.bits_per_pixel == 16U)) {
+			for (size_t j = region.top; j < region.top + region.height; j++) {
+				const size_t scanline_offset = fInfo.line_length * j;
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wcast-align"
+				uint16_t* restrict p = (uint16_t*) (fbPtr + scanline_offset) + region.left;
+#	pragma GCC diagnostic pop
+				size_t px_count = region.width;
+
+				while (px_count--) {
+					*p++ ^= 0xFFFFu;
+				}
+			}
+		} else if (unlikely(vInfo.bits_per_pixel == 4U)) {
+			// I don't particularly care about doing this in a smarter way either...
+			for (uint32_t cy = 0U; cy < region.height; cy++) {
+				for (uint32_t cx = 0U; cx < region.width; cx++) {
+					const FBInkCoordinates coords = {
+						.x = (unsigned short int) (region.left + cx),
+						.y = (unsigned short int) (region.top + cy),
+					};
+					FBInkPixel px = { 0 };
+					get_pixel_Gray4(&coords, &px);
+					px.gray8 ^= 0xFFu;
+					put_pixel_Gray4(&coords, &px);
+				}
+			}
+		} else if (vInfo.bits_per_pixel == 32U) {
+			for (size_t j = region.top; j < region.top + region.height; j++) {
+				const size_t scanline_offset = fInfo.line_length * j;
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wcast-align"
+				uint32_t* p = (uint32_t*) (fbPtr + scanline_offset) + region.left;
+#	pragma GCC diagnostic pop
+				size_t px_count = region.width;
+
+				while (px_count--) {
+					*p++ ^= 0x00FFFFFFu;
+				}
+			}
+		} else {
+			// Byte per byte should do the trick for the other bitdepths
+			for (size_t j = region.top; j < region.top + region.height; j++) {
+				// NOTE: Go with a cheap memset32 in order to preserve the alpha value of our input pixel...
+				//       The compiler should be able to turn that into something as fast as a plain memset ;).
+				const size_t scanline_offset = fInfo.line_length * j;
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wcast-align"
+				uint8_t* p = (uint8_t*) (fbPtr + scanline_offset) + region.left;
+#	pragma GCC diagnostic pop
+				size_t px_count = region.width;
+
+				while (px_count--) {
+					*p++ ^= 0xFFu;
+				}
+			}
+		}
+	}
+
+	// Cleanup
+cleanup:
+	if (isFbMapped && !keep_fd) {
+		unmap_fb();
+	}
+	if (!keep_fd) {
+		close_fb(fbfd);
+	}
+
+	return rv;
+#else
+	WARN("Drawing primitives are disabled in this FBInk build");
+	return ERRCODE(ENOSYS);
+#endif
 }
 
 // Handle cls & refresh, but for grid-based coordinates (i.e., like fbink_print()'s draw())
@@ -6108,7 +7128,11 @@ int
 
 	// Clear screen?
 	if (fbink_cfg->is_cleared) {
-		clear_screen(fbfd, fbink_cfg->is_inverted ? penBGColor ^ 0xFFu : penBGColor, fbink_cfg->is_flashing);
+		FBInkPixel bgP = penBGPixel;
+		if (fbink_cfg->is_inverted) {
+			bgP.p ^= 0x00FFFFFFu;
+		}
+		clear_screen(fbfd, &bgP, fbink_cfg->is_flashing);
 	}
 
 	// See if want to position our text relative to the edge of the screen, and not the beginning
@@ -6245,12 +7269,12 @@ int
 		// Compute the amount of characters left to print...
 		chars_left -= line_len;
 		// And use it to compute the amount of characters to print on *this* line
-		line_len = (size_t) MIN(chars_left, available_cols);
+		line_len    = (size_t) MIN(chars_left, available_cols);
 		LOG("Characters to print: %zu out of the %zu remaining ones", line_len, chars_left);
 
 		// NOTE: Now we just have to switch from characters to bytes, both for line_len & chars_left...
 		// First, get the byte offset of this section of our string (i.e., this line)...
-		line_offset += line_bytes;
+		line_offset       += line_bytes;
 		// ... then compute how many bytes we'll need to store it.
 		line_bytes         = 0U;
 		size_t   cn        = 0U;
@@ -6513,13 +7537,13 @@ static void
 						result[ci]     = CH_IGNORE;
 						result[ci + 1] = CH_IGNORE;
 						result[ci + 2] = CH_IGNORE;
-						ci += 3;
+						ci            += 3;
 						break;
 					}
 					is_bold        = !is_bold;
 					result[ci]     = CH_IGNORE;
 					result[ci + 1] = CH_IGNORE;
-					ci += 2;
+					ci            += 2;
 					break;
 				}
 				// Try to avoid flagging a single underscore in the middle of a word.
@@ -6551,7 +7575,7 @@ static void
 
 // Small helper for verbose log messages
 static __attribute__((cold)) const char*
-    glyph_style_to_string(CHARACTER_FONT_T glyph_style)
+    glyph_style_to_string(CHARACTER_FONT_E glyph_style)
 {
 	switch (glyph_style) {
 		case CH_IGNORE:
@@ -6572,7 +7596,12 @@ static __attribute__((cold)) const char*
 
 // printf-like wrapper around fbink_print & fbink_print_ot ;).
 int
-    fbink_printf(int fbfd, const FBInkOTConfig* restrict cfg, const FBInkConfig* restrict fbink_cfg, const char* fmt, ...)
+    fbink_printf(int fbfd,
+		 const FBInkOTConfig* restrict ot_cfg,
+		 const FBInkConfig* restrict fbink_cfg,
+		 FBInkOTFit* restrict ot_fit,
+		 const char* fmt,
+		 ...)
 {
 	// Assume success, until shit happens ;)
 	int rv = EXIT_SUCCESS;
@@ -6624,9 +7653,9 @@ int
 
 	// Okay, now that we've got a formatted buffer...
 	// Did we get a valid FBInkOTConfig pointer?
-	if (cfg) {
+	if (ot_cfg) {
 		// Then feed our formatted string to fbink_print_ot
-		rv = fbink_print_ot(fbfd, buffer, cfg, fbink_cfg, NULL);
+		rv = fbink_print_ot(fbfd, buffer, ot_cfg, fbink_cfg, ot_fit);
 	} else {
 		// Otherwise, feed it to fbink_print instead
 		rv = fbink_print(fbfd, buffer, fbink_cfg);
@@ -6707,7 +7736,7 @@ int
 	}
 
 	// Make sure we return accurate data in case the fit struct is being recycled...
-	if (fit) {
+	if (unlikely(fit)) {
 		fit->computed_lines = 0U;
 		fit->rendered_lines = 0U;
 		fit->truncated      = false;
@@ -7085,7 +8114,7 @@ int
 				}
 				max_line_height += height_diff;
 				// We have to bump the baseline, too, to make sure this glyph's baseline is aligned with others...
-				max_baseline += height_diff;
+				max_baseline    += height_diff;
 			}
 			// stb_truetype does not appear to create a bounding box for space characters,
 			// so we need to handle this situation.
@@ -7155,8 +8184,12 @@ int
 				uint32_t c2   = u8_nextchar2(string, &tmp_c_index);
 				int      g2i  = stbtt_FindGlyphIndex(curr_font, (int) c2);
 				int      xadv = stbtt_GetGlyphKernAdvance(curr_font, gi, g2i);
-				curr_x += iroundf(sf * (float) xadv);
+				curr_x       += iroundf(sf * (float) xadv);
 			}
+		}
+		// Remember the widest line
+		if (unlikely(fit)) {
+			fit->bbox.width = (unsigned short int) MAX(fit->bbox.width, lw);
 		}
 		// We've run out of string! This is our last line.
 		if (c_index >= str_len_bytes) {
@@ -7205,8 +8238,9 @@ int
 	LOG("Actual print height is %u", curr_print_height);
 
 	// Remember that in fit if it's a valid pointer...
-	if (fit) {
+	if (unlikely(fit)) {
 		fit->computed_lines = (unsigned short int) computed_lines_amount;
+		fit->bbox.height    = (unsigned short int) curr_print_height;
 		fit->truncated      = !complete_str;
 	}
 
@@ -7218,7 +8252,7 @@ int
 	}
 
 	// If we only asked for a computation pass, abort now (successfully).
-	if (cfg->compute_only) {
+	if (unlikely(cfg->compute_only)) {
 		LOG("Requested early abort after computation pass");
 		rv = EXIT_SUCCESS;
 		goto cleanup;
@@ -7284,26 +8318,19 @@ int
 	}
 	region.top = paint_point.y;
 
-	const uint8_t   invert     = is_inverted ? 0xFFu : 0U;
-	const uint8_t   fgcolor    = penFGColor ^ invert;
-	const uint8_t   bgcolor    = penBGColor ^ invert;
-	const short int layer_diff = (short int) (fgcolor - bgcolor);
-	FBInkPixel      fgP        = penFGPixel;
-	FBInkPixel      bgP        = penBGPixel;
+	const uint8_t invert  = is_inverted ? 0xFFu : 0U;
+	const uint8_t fgcolor = penFGColor ^ invert;
+	const uint8_t bgcolor = penBGColor ^ invert;
+	FBInkPixel    fgP     = penFGPixel;
+	FBInkPixel    bgP     = penBGPixel;
 	if (is_inverted) {
-		// NOTE: And, of course, RGB565 is terrible. Inverting the lossy packed value would be even lossier...
-		if (vInfo.bits_per_pixel == 16U) {
-			fgP.rgb565 = pack_rgb565(fgcolor, fgcolor, fgcolor);
-			bgP.rgb565 = pack_rgb565(bgcolor, bgcolor, bgcolor);
-		} else {
-			fgP.bgra.p ^= 0x00FFFFFFu;
-			bgP.bgra.p ^= 0x00FFFFFFu;
-		}
+		fgP.p ^= 0x00FFFFFFu;
+		bgP.p ^= 0x00FFFFFFu;
 	}
 
 	// Do we need to clear the screen?
 	if (is_cleared) {
-		clear_screen(fbfd, bgcolor, is_flashing);
+		clear_screen(fbfd, &bgP, is_flashing);
 	}
 
 	// Handle padding related region tweaks
@@ -7572,6 +8599,7 @@ int
 		// What we get from stbtt is an alpha coverage mask, hence the need for alpha-blending for anti-aliasing.
 		// As it's obviously expensive, we try to avoid it if possible (on fully opaque & fully transparent pixels).
 		if (!is_overlay && !is_fgless && !is_bgless) {
+			const short int layer_diff = (short int) (fgcolor - bgcolor);
 			if (abs(layer_diff) == 0xFFu) {
 				// If we're painting in B&W, use the mask as-is, it's already B&W ;).
 				// We just need to invert it ;).
@@ -7591,36 +8619,86 @@ int
 						put_pixel(paint_point, &pixel, false);
 						paint_point.x++;
 					}
-					lnPtr += max_lw;
+					lnPtr        += max_lw;
 					paint_point.x = start_x;
 					paint_point.y++;
 				}
 			} else {
-				const uint16_t pmul_bg = (uint16_t) (bgcolor * 0xFFu);
-				for (int j = 0; j < max_line_height; j++) {
-					for (unsigned int k = 0U; k < lw; k++) {
-						if (lnPtr[k] == 0U) {
-							// No coverage (transparent) -> background
-							put_pixel(paint_point, &bgP, true);
-						} else if (lnPtr[k] == 0xFFu) {
-							// Full coverage (opaque) -> foreground
-							put_pixel(paint_point, &fgP, true);
-						} else {
-							// AA, blend it using the coverage mask as alpha
-							pixel.bgra.color.r = pixel.bgra.color.g = pixel.bgra.color.b =
-							    (uint8_t) DIV255((pmul_bg + (layer_diff * lnPtr[k])));
-							put_pixel(paint_point, &pixel, false);
+				if (deviceQuirks.pixelFormat == FBINK_PXFMT_Y4 ||
+				    likely(deviceQuirks.pixelFormat == FBINK_PXFMT_Y8)) {
+					// Grayscale, we can use fgcolor/bgcolor & co directly
+					const uint16_t pmul_bg = (uint16_t) (bgcolor * 0xFFu);
+					for (int j = 0; j < max_line_height; j++) {
+						for (unsigned int k = 0U; k < lw; k++) {
+							if (lnPtr[k] == 0U) {
+								// No coverage (transparent) -> background
+								put_pixel(paint_point, &bgP, true);
+							} else if (lnPtr[k] == 0xFFu) {
+								// Full coverage (opaque) -> foreground
+								put_pixel(paint_point, &fgP, true);
+							} else {
+								// AA, blend it using the coverage mask as alpha
+								pixel.bgra.color.r     = pixel.bgra.color.g =
+								    pixel.bgra.color.b = (uint8_t) DIV255(
+									(pmul_bg + (layer_diff * lnPtr[k])));
+								put_pixel(paint_point, &pixel, false);
+							}
+							paint_point.x++;
 						}
-						paint_point.x++;
+						lnPtr        += max_lw;
+						paint_point.x = start_x;
+						paint_point.y++;
 					}
-					lnPtr += max_lw;
-					paint_point.x = start_x;
-					paint_point.y++;
+				} else {
+					// Color, we need to handle each component separately...
+					// NOTE: We packed these pixels ourselves, and we're looking up every component individually,
+					//       no need for an isRGB codepath, it would be doing the exact same thing.
+					//       (i.e., since we're not blending with *framebuffer* pixels,
+					//       the pixel layout is *consistent* across all pixels involved).
+					const uint16_t  pmul_bg_r    = (uint16_t) (bgP.bgra.color.r * 0xFFu);
+					const short int layer_diff_r = (short int) (fgP.bgra.color.r - bgP.bgra.color.r);
+					const uint16_t  pmul_bg_g    = (uint16_t) (bgP.bgra.color.g * 0xFFu);
+					const short int layer_diff_g = (short int) fgP.bgra.color.g - bgP.bgra.color.g;
+					const uint16_t  pmul_bg_b    = (uint16_t) (bgP.bgra.color.b * 0xFFu);
+					const short int layer_diff_b = (short int) fgP.bgra.color.b - bgP.bgra.color.b;
+					for (int j = 0; j < max_line_height; j++) {
+						for (unsigned int k = 0U; k < lw; k++) {
+							if (lnPtr[k] == 0U) {
+								// No coverage (transparent) -> background
+								put_pixel(paint_point, &bgP, true);
+							} else if (lnPtr[k] == 0xFFu) {
+								// Full coverage (opaque) -> foreground
+								put_pixel(paint_point, &fgP, true);
+							} else {
+								// AA, blend it using the coverage mask as alpha
+								pixel.bgra.color.r = (uint8_t) DIV255(
+								    (pmul_bg_r + (layer_diff_r * lnPtr[k])));
+								pixel.bgra.color.g = (uint8_t) DIV255(
+								    (pmul_bg_g + (layer_diff_g * lnPtr[k])));
+								pixel.bgra.color.b = (uint8_t) DIV255(
+								    (pmul_bg_b + (layer_diff_b * lnPtr[k])));
+								put_pixel(paint_point, &pixel, false);
+							}
+							paint_point.x++;
+						}
+						lnPtr        += max_lw;
+						paint_point.x = start_x;
+						paint_point.y++;
+					}
 				}
 			}
 		} else if (is_fgless) {
-			FBInkPixel     fb_px   = { 0U };
-			const uint16_t pmul_bg = (uint16_t) (bgcolor * 0xFFu);
+			FBInkPixel fb_px = { 0U };
+			uint16_t   pmul_bg_r, pmul_bg_g, pmul_bg_b;
+			if (unlikely(deviceQuirks.isRGB)) {
+				pmul_bg_r = (uint16_t) (bgP.rgba.color.r * 0xFFu);
+				pmul_bg_g = (uint16_t) (bgP.rgba.color.g * 0xFFu);
+				pmul_bg_b = (uint16_t) (bgP.rgba.color.b * 0xFFu);
+			} else {
+				pmul_bg_r = (uint16_t) (bgP.bgra.color.r * 0xFFu);
+				pmul_bg_g = (uint16_t) (bgP.bgra.color.g * 0xFFu);
+				pmul_bg_b = (uint16_t) (bgP.bgra.color.b * 0xFFu);
+			}
 			// NOTE: One more branch needed because 4bpp fbs are terrible...
 			if (vInfo.bits_per_pixel > 4U) {
 				// 8, 16, 24 & 32bpp
@@ -7633,22 +8711,38 @@ int
 							// AA, blend it using the coverage mask as alpha,
 							// and the underlying pixel as fg
 							get_pixel(paint_point, &fb_px);
-							pixel.bgra.color.r = (uint8_t) DIV255(
-							    (pmul_bg + ((fb_px.bgra.color.r - bgcolor) * lnPtr[k])));
-							pixel.bgra.color.g = (uint8_t) DIV255(
-							    (pmul_bg + ((fb_px.bgra.color.g - bgcolor) * lnPtr[k])));
-							pixel.bgra.color.b = (uint8_t) DIV255(
-							    (pmul_bg + ((fb_px.bgra.color.b - bgcolor) * lnPtr[k])));
+							if (unlikely(deviceQuirks.isRGB)) {
+								pixel.rgba.color.r = (uint8_t) DIV255((
+								    pmul_bg_r + ((fb_px.rgba.color.r - bgP.rgba.color.r) *
+										 lnPtr[k])));
+								pixel.rgba.color.g = (uint8_t) DIV255((
+								    pmul_bg_g + ((fb_px.rgba.color.g - bgP.rgba.color.g) *
+										 lnPtr[k])));
+								pixel.rgba.color.b = (uint8_t) DIV255((
+								    pmul_bg_b + ((fb_px.rgba.color.b - bgP.rgba.color.b) *
+										 lnPtr[k])));
+							} else {
+								pixel.bgra.color.r = (uint8_t) DIV255((
+								    pmul_bg_r + ((fb_px.bgra.color.r - bgP.bgra.color.r) *
+										 lnPtr[k])));
+								pixel.bgra.color.g = (uint8_t) DIV255((
+								    pmul_bg_g + ((fb_px.bgra.color.g - bgP.bgra.color.g) *
+										 lnPtr[k])));
+								pixel.bgra.color.b = (uint8_t) DIV255((
+								    pmul_bg_b + ((fb_px.bgra.color.b - bgP.bgra.color.b) *
+										 lnPtr[k])));
+							}
 							put_pixel(paint_point, &pixel, false);
 						}
 						paint_point.x++;
 					}
-					lnPtr += max_lw;
+					lnPtr        += max_lw;
 					paint_point.x = start_x;
 					paint_point.y++;
 				}
 			} else {
 				// 4bpp... We'll have to alpha-blend *everything* to avoid clobbering pixels...
+				const uint16_t pmul_bg = (uint16_t) (bgcolor * 0xFFu);
 				for (int j = 0; j < max_line_height; j++) {
 					for (unsigned int k = 0U; k < lw; k++) {
 						// AA, blend it using the coverage mask as alpha, and the underlying pixel as fg
@@ -7658,7 +8752,7 @@ int
 						put_pixel(paint_point, &pixel, false);
 						paint_point.x++;
 					}
-					lnPtr += max_lw;
+					lnPtr        += max_lw;
 					paint_point.x = start_x;
 					paint_point.y++;
 				}
@@ -7673,30 +8767,45 @@ int
 							// Full coverage (opaque) -> foreground
 							get_pixel(paint_point, &fb_px);
 							// We want our foreground to be the inverse of the underlying pixel...
-							pixel.bgra.p = fb_px.bgra.p ^ 0x00FFFFFFu;
+							pixel.p = fb_px.p ^ 0x00FFFFFFu;
 							put_pixel(paint_point, &pixel, false);
 						} else if (lnPtr[k] != 0U) {
 							// AA, blend it using the coverage mask as alpha,
 							// and the underlying pixel as bg
 							// Without forgetting our foreground color trickery...
 							get_pixel(paint_point, &fb_px);
-							pixel.bgra.color.r = (uint8_t) DIV255(
-							    (MUL255(fb_px.bgra.color.r) +
-							     (((fb_px.bgra.color.r ^ 0xFF) - fb_px.bgra.color.r) *
-							      lnPtr[k])));
-							pixel.bgra.color.g = (uint8_t) DIV255(
-							    (MUL255(fb_px.bgra.color.g) +
-							     (((fb_px.bgra.color.g ^ 0xFF) - fb_px.bgra.color.g) *
-							      lnPtr[k])));
-							pixel.bgra.color.b = (uint8_t) DIV255(
-							    (MUL255(fb_px.bgra.color.b) +
-							     (((fb_px.bgra.color.b ^ 0xFF) - fb_px.bgra.color.b) *
-							      lnPtr[k])));
+							if (unlikely(deviceQuirks.isRGB)) {
+								pixel.rgba.color.r = (uint8_t) DIV255(
+								    (MUL255(fb_px.rgba.color.r) +
+								     (((fb_px.rgba.color.r ^ 0xFF) - fb_px.rgba.color.r) *
+								      lnPtr[k])));
+								pixel.rgba.color.g = (uint8_t) DIV255(
+								    (MUL255(fb_px.rgba.color.g) +
+								     (((fb_px.rgba.color.g ^ 0xFF) - fb_px.rgba.color.g) *
+								      lnPtr[k])));
+								pixel.rgba.color.b = (uint8_t) DIV255(
+								    (MUL255(fb_px.rgba.color.b) +
+								     (((fb_px.rgba.color.b ^ 0xFF) - fb_px.rgba.color.b) *
+								      lnPtr[k])));
+							} else {
+								pixel.bgra.color.r = (uint8_t) DIV255(
+								    (MUL255(fb_px.bgra.color.r) +
+								     (((fb_px.bgra.color.r ^ 0xFF) - fb_px.bgra.color.r) *
+								      lnPtr[k])));
+								pixel.bgra.color.g = (uint8_t) DIV255(
+								    (MUL255(fb_px.bgra.color.g) +
+								     (((fb_px.bgra.color.g ^ 0xFF) - fb_px.bgra.color.g) *
+								      lnPtr[k])));
+								pixel.bgra.color.b = (uint8_t) DIV255(
+								    (MUL255(fb_px.bgra.color.b) +
+								     (((fb_px.bgra.color.b ^ 0xFF) - fb_px.bgra.color.b) *
+								      lnPtr[k])));
+							}
 							put_pixel(paint_point, &pixel, false);
 						}
 						paint_point.x++;
 					}
-					lnPtr += max_lw;
+					lnPtr        += max_lw;
 					paint_point.x = start_x;
 					paint_point.y++;
 				}
@@ -7713,7 +8822,7 @@ int
 						put_pixel(paint_point, &pixel, false);
 						paint_point.x++;
 					}
-					lnPtr += max_lw;
+					lnPtr        += max_lw;
 					paint_point.x = start_x;
 					paint_point.y++;
 				}
@@ -7731,20 +8840,38 @@ int
 							// AA, blend it using the coverage mask as alpha,
 							// and the underlying pixel as bg
 							get_pixel(paint_point, &fb_px);
-							pixel.bgra.color.r = (uint8_t) DIV255(
-							    (MUL255(fb_px.bgra.color.r) +
-							     ((fgcolor - fb_px.bgra.color.r) * lnPtr[k])));
-							pixel.bgra.color.g = (uint8_t) DIV255(
-							    (MUL255(fb_px.bgra.color.g) +
-							     ((fgcolor - fb_px.bgra.color.g) * lnPtr[k])));
-							pixel.bgra.color.b = (uint8_t) DIV255(
-							    (MUL255(fb_px.bgra.color.b) +
-							     ((fgcolor - fb_px.bgra.color.b) * lnPtr[k])));
+							if (unlikely(deviceQuirks.isRGB)) {
+								pixel.rgba.color.r = (uint8_t) DIV255(
+								    (MUL255(fb_px.rgba.color.r) +
+								     ((fgP.rgba.color.r - fb_px.rgba.color.r) *
+								      lnPtr[k])));
+								pixel.rgba.color.g = (uint8_t) DIV255(
+								    (MUL255(fb_px.rgba.color.g) +
+								     ((fgP.rgba.color.g - fb_px.rgba.color.g) *
+								      lnPtr[k])));
+								pixel.rgba.color.b = (uint8_t) DIV255(
+								    (MUL255(fb_px.rgba.color.b) +
+								     ((fgP.rgba.color.b - fb_px.rgba.color.b) *
+								      lnPtr[k])));
+							} else {
+								pixel.bgra.color.r = (uint8_t) DIV255(
+								    (MUL255(fb_px.bgra.color.r) +
+								     ((fgP.bgra.color.r - fb_px.bgra.color.r) *
+								      lnPtr[k])));
+								pixel.bgra.color.g = (uint8_t) DIV255(
+								    (MUL255(fb_px.bgra.color.g) +
+								     ((fgP.bgra.color.g - fb_px.bgra.color.g) *
+								      lnPtr[k])));
+								pixel.bgra.color.b = (uint8_t) DIV255(
+								    (MUL255(fb_px.bgra.color.b) +
+								     ((fgP.bgra.color.b - fb_px.bgra.color.b) *
+								      lnPtr[k])));
+							}
 							put_pixel(paint_point, &pixel, false);
 						}
 						paint_point.x++;
 					}
-					lnPtr += max_lw;
+					lnPtr        += max_lw;
 					paint_point.x = start_x;
 					paint_point.y++;
 				}
@@ -7759,7 +8886,7 @@ int
 						put_pixel(paint_point, &pixel, false);
 						paint_point.x++;
 					}
-					lnPtr += max_lw;
+					lnPtr        += max_lw;
 					paint_point.x = start_x;
 					paint_point.y++;
 				}
@@ -7805,7 +8932,7 @@ int
 	if (paint_point.y + max_line_height > area.br.y) {
 		rv = 0;    // Inform the caller there is no room left to print another row.
 	} else {
-		rv = paint_point.y;    // inform the caller what their next top margin should be to follow on
+		rv  = paint_point.y;    // inform the caller what their next top margin should be to follow on
 		// NOTE: Don't forget to subtract the hardware viewport shenanigans, to avoid applying the viewport twice,
 		//       since the next print_ot call will add this to top_margin again...
 		rv -= (viewVertOrigin - viewVertOffset);
@@ -7819,7 +8946,7 @@ int
 	LOG("Printed %u visible lines", line);
 
 	// Remember that in fit if it's a valid pointer...
-	if (fit) {
+	if (unlikely(fit)) {
 		fit->rendered_lines = (unsigned short int) line;
 	}
 
@@ -7830,7 +8957,7 @@ int
 		    computed_lines_amount);
 
 		// Remember that in fit if it's a valid pointer...
-		if (fit) {
+		if (unlikely(fit)) {
 			fit->truncated = true;
 		}
 
@@ -7889,9 +9016,9 @@ static uint32_t
 #	if defined(FBINK_FOR_KINDLE)
 	// Is this a Zelda or a Rex with new waveforms?
 	// (MTK also supports those with matching constants).
-	const bool has_new_wfm = (deviceQuirks.isKindleZelda || deviceQuirks.isKindleRex || deviceQuirks.isKindleMTK);
+	const bool has_new_wfm = (deviceQuirks.isKindleZelda || deviceQuirks.isKindleRex || deviceQuirks.isMTK);
 	// Is this device running on a MTK SoC?
-	const bool has_mtk_wfm = deviceQuirks.isKindleMTK;
+	const bool has_mtk_wfm = deviceQuirks.isMTK;
 
 	switch (wfm_mode_index) {
 		case WFM_INIT:
@@ -8018,6 +9145,34 @@ static uint32_t
 				waveform_mode = WAVEFORM_MODE_AUTO;
 			}
 			break;
+		case WFM_GCC16:
+			if (has_mtk_wfm) {
+				waveform_mode = MTK_WAVEFORM_MODE_GCC16;
+			} else {
+				waveform_mode = WAVEFORM_MODE_AUTO;
+			}
+			break;
+		case WFM_GLRC16:
+			if (has_mtk_wfm) {
+				waveform_mode = MTK_WAVEFORM_MODE_GLRC16;
+			} else {
+				waveform_mode = WAVEFORM_MODE_AUTO;
+			}
+			break;
+		case WFM_GCCK16:
+			if (has_mtk_wfm) {
+				waveform_mode = MTK_WAVEFORM_MODE_GCCK16;
+			} else {
+				waveform_mode = WAVEFORM_MODE_AUTO;
+			}
+			break;
+		case WFM_GLRCK16:
+			if (has_mtk_wfm) {
+				waveform_mode = MTK_WAVEFORM_MODE_GLRCK16;
+			} else {
+				waveform_mode = WAVEFORM_MODE_AUTO;
+			}
+			break;
 		default:
 			LOG("Unknown (or unsupported) waveform mode '%s' @ index %hhu, defaulting to AUTO",
 			    wfm_to_string(wfm_mode_index),
@@ -8128,7 +9283,49 @@ static uint32_t
 			break;
 	}
 #	elif defined(FBINK_FOR_KOBO)
-	if (deviceQuirks.isSunxi) {
+	if (deviceQuirks.isMTK) {
+		switch (wfm_mode_index) {
+			case WFM_INIT:
+				waveform_mode = HWTCON_WAVEFORM_MODE_INIT;
+				break;
+			case WFM_DU:
+				waveform_mode = HWTCON_WAVEFORM_MODE_DU;
+				break;
+			case WFM_GC16:
+				waveform_mode = HWTCON_WAVEFORM_MODE_GC16;
+				break;
+			case WFM_GL16:
+				waveform_mode = HWTCON_WAVEFORM_MODE_GL16;
+				break;
+			case WFM_REAGL:
+				waveform_mode = HWTCON_WAVEFORM_MODE_GLR16;
+				break;
+			case WFM_A2:
+				waveform_mode = HWTCON_WAVEFORM_MODE_A2;
+				break;
+			case WFM_GCK16:
+				waveform_mode = HWTCON_WAVEFORM_MODE_GCK16;
+				break;
+			case WFM_GLKW16:
+				waveform_mode = HWTCON_WAVEFORM_MODE_GLKW16;
+				break;
+			case WFM_GCC16:
+				waveform_mode = HWTCON_WAVEFORM_MODE_GCC16;
+				break;
+			case WFM_GLRC16:
+				waveform_mode = HWTCON_WAVEFORM_MODE_GLRC16;
+				break;
+			case WFM_AUTO:
+				waveform_mode = HWTCON_WAVEFORM_MODE_AUTO;
+				break;
+			default:
+				LOG("Unknown (or unsupported) waveform mode '%s' @ index %hhu, defaulting to GL16",
+				    wfm_to_string(wfm_mode_index),
+				    wfm_mode_index);
+				waveform_mode = HWTCON_WAVEFORM_MODE_GL16;
+				break;
+		}
+	} else if (deviceQuirks.isSunxi) {
 		switch (wfm_mode_index) {
 			case WFM_INIT:
 				waveform_mode = EINK_INIT_MODE;
@@ -8285,7 +9482,7 @@ static uint32_t
 
 // Convert a WFM_MODE_INDEX_T value to a human readable string
 static __attribute__((cold)) const char*
-    wfm_to_string(WFM_MODE_INDEX_T wfm_mode_index)
+    wfm_to_string(WFM_MODE_INDEX_E wfm_mode_index)
 {
 	switch (wfm_mode_index) {
 		case WFM_AUTO:
@@ -8342,6 +9539,20 @@ static __attribute__((cold)) const char*
 			return "GC4L";
 		case WFM_GCC16:
 			return "GCC16";
+		case WFM_GLRC16:
+			return "GLRC16";
+		case WFM_GC16_PARTIAL:
+			return "GC16_PARTIAL";
+		case WFM_GCK16_PARTIAL:
+			return "GCK16_PARTIAL";
+		case WFM_DUNM:
+			return "DUNM";
+		case WFM_P2SW:
+			return "P2SW";
+		case WFM_GCCK16:
+			return "GCCK16";
+		case WFM_GLRCK16:
+			return "GLRCK16";
 		default:
 			return "Unknown";
 	}
@@ -8450,6 +9661,40 @@ static __attribute__((cold)) const char*
 			return "Unknown";
 	}
 }
+
+// NOTE: Currently unnecessary, the ioctl doesn't update the userland data
+/*
+static __attribute__((cold)) const char*
+    mtk_wfm_to_string(uint32_t wfm_mode)
+{
+	switch (wfm_mode) {
+		case HWTCON_WAVEFORM_MODE_INIT:
+			return "INIT";
+		case HWTCON_WAVEFORM_MODE_DU:
+			return "DU";
+		case HWTCON_WAVEFORM_MODE_GC16:
+			return "GC16";
+		case HWTCON_WAVEFORM_MODE_GL16:
+			return "GL16";
+		case HWTCON_WAVEFORM_MODE_REAGL:
+			return "REAGL";
+		case HWTCON_WAVEFORM_MODE_A2:
+			return "A2";
+		case HWTCON_WAVEFORM_MODE_GCK16:
+			return "GCK16";
+		case HWTCON_WAVEFORM_MODE_GLKW16:
+			return "GLKW16";
+		case HWTCON_WAVEFORM_MODE_GCC16:
+			return "GCC16";
+		case HWTCON_WAVEFORM_MODE_GLRC16:
+			return "GLRC16";
+		case HWTCON_WAVEFORM_MODE_AUTO:
+			return "AUTO";
+		default:
+			return "Unknown";
+	}
+}
+*/
 #	endif    // FBINK_FOR_KOBO
 
 #	if defined(FBINK_FOR_CERVANTES)
@@ -8546,7 +9791,7 @@ static __attribute__((cold)) const char*
 #	if defined(FBINK_FOR_KOBO) || defined(FBINK_FOR_KINDLE)
 // Convert our public HW_DITHER_INDEX_T values to an appropriate mxcfb dithering mode constant
 static int
-    get_hwd_mode(HW_DITHER_INDEX_T hw_dither_index)
+    get_hwd_mode(HW_DITHER_INDEX_E hw_dither_index)
 {
 	// NOTE: This hardware dithering (handled by the PxP on i.MX) is only supported since EPDC v2!
 	//       AFAICT, most of our eligible target devices only support PASSTHROUGH & ORDERED...
@@ -8590,7 +9835,7 @@ static int
 
 // Convert a HW_DITHER_INDEX_T value to a human readable string
 static __attribute__((cold)) const char*
-    hwd_to_string(HW_DITHER_INDEX_T hw_dither_index)
+    hwd_to_string(HW_DITHER_INDEX_E hw_dither_index)
 {
 	switch (hw_dither_index) {
 		case HWD_PASSTHROUGH:
@@ -8694,11 +9939,31 @@ cleanup:
 #endif    // !FBINK_FOR_LINUX
 }
 
+// Because I just couldn't be arsed to deal with broken out rectangles anymore ;p.
+int
+    fbink_refresh_rect(int fbfd                              UNUSED_BY_LINUX,
+		       const FBInkRect* restrict rect        UNUSED_BY_LINUX,
+		       const FBInkConfig* restrict fbink_cfg UNUSED_BY_LINUX)
+{
+#ifndef FBINK_FOR_LINUX
+	return fbink_refresh(fbfd, rect->top, rect->left, rect->width, rect->height, fbink_cfg);
+#else
+	WARN("e-Ink screen refreshes require an e-Ink device");
+	return ERRCODE(ENOSYS);
+#endif    // !FBINK_FOR_LINUX
+}
+
 // Small public wrapper around wait_for_submission(), without the caller having to depend on mxcfb headers
 int
     fbink_wait_for_submission(int fbfd UNUSED_BY_NOTKINDLE, uint32_t marker UNUSED_BY_NOTKINDLE)
 {
-#ifdef FBINK_FOR_KINDLE
+#if defined(FBINK_FOR_KINDLE) || defined(FBINK_FOR_KOBO)
+	// Abort early on unsupported devices
+	if (!deviceQuirks.canWaitForSubmission) {
+		WARN("Waiting for update submission is not supported on your device");
+		return ERRCODE(ENOSYS);
+	}
+
 	// Open the framebuffer if need be (nonblock, we'll only do ioctls)...
 	bool keep_fd = true;
 	if (open_fb_fd_nonblock(&fbfd, &keep_fd) != EXIT_SUCCESS) {
@@ -8731,9 +9996,9 @@ cleanup:
 
 	return rv;
 #else
-	WARN("Waiting for update submission is only supported on Kindle");
+	WARN("Waiting for update submission is not supported on your device");
 	return ERRCODE(ENOSYS);
-#endif    // FBINK_FOR_KINDLE
+#endif    // FBINK_FOR_KINDLE || FBINK_FOR_KOBO
 }
 
 // Small public wrapper around wait_for_complete(), without the caller having to depend on mxcfb headers
@@ -9033,23 +10298,17 @@ int
 	const uint8_t fgcolor = penFGColor ^ invert;
 	const uint8_t bgcolor = penBGColor ^ invert;
 
-	// Clear screen?
-	if (fbink_cfg->is_cleared) {
-		clear_screen(fbfd, bgcolor, fbink_cfg->is_flashing);
-	}
-
 	// Let's go! Start by pilfering some computations from draw...
 	FBInkPixel fgP = penFGPixel;
 	FBInkPixel bgP = penBGPixel;
 	if (fbink_cfg->is_inverted) {
-		// NOTE: And, of course, RGB565 is terrible. Inverting the lossy packed value would be even lossier...
-		if (unlikely(vInfo.bits_per_pixel == 16U)) {
-			fgP.rgb565 = pack_rgb565(fgcolor, fgcolor, fgcolor);
-			bgP.rgb565 = pack_rgb565(bgcolor, bgcolor, bgcolor);
-		} else {
-			fgP.bgra.p ^= 0x00FFFFFFu;
-			bgP.bgra.p ^= 0x00FFFFFFu;
-		}
+		fgP.p ^= 0x00FFFFFFu;
+		bgP.p ^= 0x00FFFFFFu;
+	}
+
+	// Clear screen?
+	if (fbink_cfg->is_cleared) {
+		clear_screen(fbfd, &bgP, fbink_cfg->is_flashing);
 	}
 
 	// Clamp v offset to safe values
@@ -9459,7 +10718,6 @@ static unsigned char*
 				temp    = NULL;
 			}
 
-			// cppcheck-suppress nullPointerArithmetic ; imgdata can't be NULL
 			size_t nread = fread(imgdata + used, 1U, CHUNK, stdin);
 			if (nread == 0U) {
 				break;
@@ -9527,7 +10785,7 @@ static unsigned char*
 		const unsigned char* restrict src = data + (j * x * img_n);
 		unsigned char* restrict dest      = good + (j * x * req_comp);
 
-#	define STBI__COMBO(a, b) ((a) *8 + (b))
+#	define STBI__COMBO(a, b) ((a) * 8 + (b))
 #	define STBI__CASE(a, b)                                                                                         \
 		case STBI__COMBO(a, b):                                                                                  \
 			for (int i = x - 1; i >= 0; --i, src += a, dest += b)
@@ -9661,6 +10919,38 @@ static __attribute__((hot)) uint8_t
 	return (q > UINT8_MAX ? UINT8_MAX : (uint8_t) q);
 }
 
+static uint8_t
+    hhuclampf(float d, float min, float max)
+{
+	const float t = d < min ? min : d;
+	return t > max ? (uint8_t) max : (uint8_t) t;
+}
+
+static __attribute__((hot)) void
+    saturation_boost_hsp(FBInkPixelRGBA* restrict px, const float change)
+{
+	// This is Darel Rex Finley's HSP changeSaturation function.
+	// c.f., https://alienryderflex.com/saturation.html
+	// We lowered precision from double to floats for performance concerns.
+#	define Pr 0.299f
+#	define Pg 0.587f
+#	define Pb 0.114f
+
+	float R = px->color.r;
+	float G = px->color.g;
+	float B = px->color.b;
+
+	float P = sqrtf(R * R * Pr + G * G * Pg + B * B * Pb);
+
+	R = P + (R - P) * change;
+	G = P + (G - P) * change;
+	B = P + (B - P) * change;
+
+	px->color.r = hhuclampf(R, 0, UINT8_MAX);
+	px->color.g = hhuclampf(G, 0, UINT8_MAX);
+	px->color.b = hhuclampf(B, 0, UINT8_MAX);
+}
+
 // Draw image data on screen (we inherit a few of the variable types/names from stbi ;))
 static int
     draw_image(int fbfd,
@@ -9693,7 +10983,11 @@ static int
 
 	// Clear screen?
 	if (fbink_cfg->is_cleared) {
-		clear_screen(fbfd, fbink_cfg->is_inverted ? penBGColor ^ 0xFFu : penBGColor, fbink_cfg->is_flashing);
+		FBInkPixel bgP = penBGPixel;
+		if (fbink_cfg->is_inverted) {
+			bgP.p ^= 0x00FFFFFFu;
+		}
+		clear_screen(fbfd, &bgP, fbink_cfg->is_flashing);
 	}
 
 	// NOTE: We compute initial offsets from row/col, to help aligning images with text.
@@ -9725,33 +11019,6 @@ static int
 	    y_off,
 	    fbink_cfg->col,
 	    fbink_cfg->row);
-
-	bool       fb_is_grayscale = false;
-	bool       fb_is_legacy    = false;
-	bool       fb_is_24bpp     = false;
-	bool       fb_is_true_bgr  = false;
-	bool       img_has_alpha   = false;
-	FBInkPixel pixel           = { 0U };
-	// Use boolean flags to make the mess of branching slightly more human-readable later...
-	switch (vInfo.bits_per_pixel) {
-		case 4U:
-			fb_is_grayscale = true;
-			fb_is_legacy    = true;
-			break;
-		case 8U:
-			fb_is_grayscale = true;
-			break;
-		case 16U:
-			break;
-		case 24U:
-			fb_is_24bpp    = true;
-			fb_is_true_bgr = true;
-			break;
-		case 32U:
-		default:
-			fb_is_true_bgr = true;
-			break;
-	}
 
 	// Handle horizontal alignment...
 	switch (fbink_cfg->halign) {
@@ -9844,6 +11111,11 @@ static int
 	    w,
 	    h);
 	// Warn if there's an alpha channel, because it's usually a bit more expensive to handle...
+	// NOTE: We look at the *original* pixel format, not whatever we ended up passing to draw_image,
+	//       because we know that when we had to add an alpha layer for compatibility with the framebuffer
+	//       pixel format (i.e., a 24bpp RGB image to a 32bpp RGBA fb), it's actually fully opaque,
+	//       so we don't actually care about that component, it's just essentially padding for addressing purposes.
+	bool img_has_alpha = false;
 	if (n == 2 || n == 4) {
 		img_has_alpha = true;
 		if (fbink_cfg->ignore_alpha) {
@@ -9853,30 +11125,37 @@ static int
 		}
 	}
 
+	// Pre-compute the saturation boost factor, if any
+	const float sat_boost = 1.0f + (fbink_cfg->saturation_boost / 100.0f);
+
 	// Handle inversion if requested, in a way that avoids branching in the loop ;).
 	// And, as an added bonus, plays well with the fact that legacy devices have an inverted color map...
-	uint8_t  inv     = 0U;
-	uint32_t inv_rgb = 0U;
+	uint8_t  inv      = 0U;
+	uint24_t inv_rgb  = { 0U };
+	uint32_t inv_rgba = 0U;
 #	ifdef FBINK_FOR_KINDLE
 	if ((deviceQuirks.isKindleLegacy && !fbink_cfg->is_inverted) ||
 	    (!deviceQuirks.isKindleLegacy && fbink_cfg->is_inverted)) {
 #	else
 	if (fbink_cfg->is_inverted) {
 #	endif
-		inv     = 0xFFu;
-		inv_rgb = 0x00FFFFFFu;
+		inv         = 0xFFu;
+		inv_rgb.u24 = 0xFFFFFFu;
+		inv_rgba    = 0x00FFFFFFu;
 	}
 	// And we'll make 'em constants to eke out a tiny bit of performance...
 	const uint8_t  invert     = inv;
-	const uint32_t invert_rgb = inv_rgb;
+	const uint24_t invert_24b = inv_rgb;
+	const uint32_t invert_32b = inv_rgba;
 	// NOTE: The *slight* duplication is on purpose, to move the branching outside the loop,
 	//       and make use of a few different blitting tweaks depending on the situation...
 	//       And since we can easily do so from here,
 	//       we also entirely avoid trying to plot off-screen pixels (on any sides).
-	if (likely(fb_is_grayscale)) {
+	FBInkPixel     pixel      = { 0U };
+	if (deviceQuirks.pixelFormat == FBINK_PXFMT_Y4 || likely(deviceQuirks.pixelFormat == FBINK_PXFMT_Y8)) {
 		// 4bpp & 8bpp
 		if (!fbink_cfg->ignore_alpha && img_has_alpha) {
-			if (likely(!fb_is_legacy)) {
+			if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_Y8)) {
 				// 8bpp
 				// There's an alpha channel in the image, we'll have to do alpha blending...
 				// c.f., https://en.wikipedia.org/wiki/Alpha_compositing
@@ -9890,7 +11169,6 @@ static int
 #	pragma GCC diagnostic push
 #	pragma GCC diagnostic ignored "-Wcast-align"
 						// First, we gobble the full image pixel (all 2 bytes)
-						// cppcheck-suppress unreadVariable ; false-positive (union)
 						img_px.p = *((const uint16_t*) (data + img_scanline_offset) + i);
 #	pragma GCC diagnostic pop
 
@@ -9931,11 +11209,10 @@ static int
 							get_pixel_Gray8(&coords, &bg_px);
 
 							const uint8_t ainv = img_px.color.a ^ 0xFFu;
-							// Don't forget to honor inversion
-							img_px.color.v ^= invert;
 							// Blend it!
-							pixel.gray8 = (uint8_t) DIV255(
-							    ((img_px.color.v * img_px.color.a) + (bg_px.gray8 * ainv)));
+							pixel.gray8        = (uint8_t) DIV255(
+							    (((img_px.color.v ^ invert) * img_px.color.a) +
+							     (bg_px.gray8 * ainv)));
 							// SW dithering
 							if (fbink_cfg->sw_dithering) {
 								pixel.gray8 = dither_o8x8(i, j, pixel.gray8);
@@ -9971,11 +11248,9 @@ static int
 #	pragma GCC diagnostic pop
 
 						const uint8_t ainv = img_px.color.a ^ 0xFFu;
-						// Don't forget to honor inversion
-						img_px.color.v ^= invert;
 						// Blend it!
-						pixel.gray8 = (uint8_t) DIV255(
-						    ((img_px.color.v * img_px.color.a) + (bg_px.gray8 * ainv)));
+						pixel.gray8        = (uint8_t) DIV255((
+						    ((img_px.color.v ^ invert) * img_px.color.a) + (bg_px.gray8 * ainv)));
 						// SW dithering
 						if (fbink_cfg->sw_dithering) {
 							pixel.gray8 = dither_o8x8(i, j, pixel.gray8);
@@ -9989,13 +11264,14 @@ static int
 			// No alpha in image, or ignored
 			// We can do a simple copy if the target is 8bpp, the source is 8bpp (no alpha), we don't invert,
 			// and we don't dither.
-			if (!fb_is_legacy && req_n == 1 && invert == 0U && !fbink_cfg->sw_dithering) {
+			if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_Y8) && req_n == 1 && invert == 0U &&
+			    !fbink_cfg->sw_dithering) {
 				// Scanline by scanline, as we usually have input/output x offsets to honor
 				for (unsigned short int j = img_y_off; j < max_height; j++) {
 					// NOTE: Again, assume the fb origin is @ (0, 0), which should hold true at that bitdepth.
 					const size_t pix_offset = (size_t) ((j * w) + img_x_off);
 					const size_t fb_offset  = ((uint32_t) (j + y_off) * fInfo.line_length) +
-								 (unsigned int) (img_x_off + x_off);
+								  (unsigned int) (img_x_off + x_off);
 					memcpy(fbPtr + fb_offset, data + pix_offset, max_width);
 				}
 			} else {
@@ -10017,7 +11293,7 @@ static int
 						// NOTE: Again, use the pixel functions directly, to skip redundant OOB checks,
 						//       as well as unneeded rotation checks (can't happen at this bpp).
 						// NOTE: GCC appears to be smart enough to hoist that branch out of the loop ;).
-						if (!fb_is_legacy) {
+						if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_Y8)) {
 #	ifdef FBINK_FOR_POCKETBOOK
 							(*fxpRotateCoords)(&coords);
 #	endif
@@ -10029,16 +11305,22 @@ static int
 				}
 			}
 		}
-	} else if (likely(fb_is_true_bgr)) {
+	} else if (unlikely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR24) ||
+		   unlikely(deviceQuirks.pixelFormat == FBINK_PXFMT_RGB24) ||
+		   likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGRA) || deviceQuirks.pixelFormat == FBINK_PXFMT_RGBA ||
+		   likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR32) ||
+		   deviceQuirks.pixelFormat == FBINK_PXFMT_RGB32) {
 		// 24bpp & 32bpp
 		if (!fbink_cfg->ignore_alpha && img_has_alpha) {
 			FBInkPixelRGBA img_px;
-			if (likely(!fb_is_24bpp)) {
+			if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGRA) ||
+			    deviceQuirks.pixelFormat == FBINK_PXFMT_RGBA ||
+			    likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR32) ||
+			    deviceQuirks.pixelFormat == FBINK_PXFMT_RGB32) {
 				// 32bpp
-				FBInkPixelBGRA fb_px;
+				FBInkPixel fb_px;
 				// This is essentially a constant in our case... (c.f., put_pixel_RGB32)
-				// cppcheck-suppress unreadVariable ; false-positive (union)
-				fb_px.color.a = 0xFFu;
+				fb_px.bgra.color.a = 0xFFu;
 				for (unsigned short int j = img_y_off; j < max_height; j++) {
 					for (unsigned short int i = img_x_off; i < max_width; i++) {
 						// NOTE: We should be able to skip rotation hacks at this bpp...
@@ -10049,26 +11331,48 @@ static int
 #	pragma GCC diagnostic push
 #	pragma GCC diagnostic ignored "-Wcast-align"
 						// First, we gobble the full image pixel (all 4 bytes)
-						// cppcheck-suppress unreadVariable ; false-positive (union)
 						img_px.p = *((const uint32_t*) (data + img_scanline_offset) + i);
 #	pragma GCC diagnostic pop
 
 						// Take a shortcut for the most common alpha values (none & full)
 						if (img_px.color.a == 0xFFu) {
 							// Fully opaque, we can blit the image (almost) directly.
+							// Do we want a saturation boost?
+							if (fbink_cfg->saturation_boost != 0U) {
+								saturation_boost_hsp(&img_px, sat_boost);
+							}
 							// We do need to handle BGR and honor inversion ;).
-							// cppcheck-suppress unreadVariable ; false-positive (union)
-							img_px.p ^= invert_rgb;
+							img_px.p ^= invert_32b;
 							// And software dithering... Not a fan of the extra branching,
 							// but that's probably the best we can do.
-							if (fbink_cfg->sw_dithering) {
-								fb_px.color.r = dither_o8x8(i, j, img_px.color.r);
-								fb_px.color.g = dither_o8x8(i, j, img_px.color.g);
-								fb_px.color.b = dither_o8x8(i, j, img_px.color.b);
+							// Hopefully the RGB vs. BGR branching will be hoisted up by the compiler...
+							// NOTE: This is why we use the full explicit list instead of isRGB: it matches the outer if.
+							if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGRA) ||
+							    likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR32)) {
+								if (fbink_cfg->sw_dithering) {
+									fb_px.bgra.color.r =
+									    dither_o8x8(i, j, img_px.color.r);
+									fb_px.bgra.color.g =
+									    dither_o8x8(i, j, img_px.color.g);
+									fb_px.bgra.color.b =
+									    dither_o8x8(i, j, img_px.color.b);
+								} else {
+									fb_px.bgra.color.r = img_px.color.r;
+									fb_px.bgra.color.g = img_px.color.g;
+									fb_px.bgra.color.b = img_px.color.b;
+								}
 							} else {
-								fb_px.color.r = img_px.color.r;
-								fb_px.color.g = img_px.color.g;
-								fb_px.color.b = img_px.color.b;
+								if (fbink_cfg->sw_dithering) {
+									fb_px.rgba.color.r =
+									    dither_o8x8(i, j, img_px.color.r);
+									fb_px.rgba.color.g =
+									    dither_o8x8(i, j, img_px.color.g);
+									fb_px.rgba.color.b =
+									    dither_o8x8(i, j, img_px.color.b);
+								} else {
+									// Same pixel order
+									fb_px.p = img_px.p;
+								}
 							}
 
 							const size_t fb_scanline_offset =
@@ -10089,7 +11393,7 @@ static int
 							const size_t fb_scanline_offset =
 							    (uint32_t) ((unsigned short int) (j + y_off) *
 									fInfo.line_length);
-							FBInkPixelBGRA bg_px;
+							FBInkPixel bg_px;
 #	pragma GCC diagnostic push
 #	pragma GCC diagnostic ignored "-Wcast-align"
 							// Again, read the full pixel from the framebuffer (all 4 bytes)
@@ -10097,21 +11401,52 @@ static int
 							    *((uint32_t*) (fbPtr + fb_scanline_offset) + (i + x_off));
 #	pragma GCC diagnostic pop
 
+							// Saturation boost
+							if (fbink_cfg->saturation_boost != 0U) {
+								saturation_boost_hsp(&img_px, sat_boost);
+							}
 							// Don't forget to honor inversion
-							// cppcheck-suppress unreadVariable ; false-positive (union)
-							img_px.p ^= invert_rgb;
-							// Blend it, we get our BGR swap in the process ;).
-							fb_px.color.r = (uint8_t) DIV255(
-							    ((img_px.color.r * img_px.color.a) + (bg_px.color.r * ainv)));
-							fb_px.color.g = (uint8_t) DIV255(
-							    ((img_px.color.g * img_px.color.a) + (bg_px.color.g * ainv)));
-							fb_px.color.b = (uint8_t) DIV255(
-							    ((img_px.color.b * img_px.color.a) + (bg_px.color.b * ainv)));
-							// SW dithering
-							if (fbink_cfg->sw_dithering) {
-								fb_px.color.r = dither_o8x8(i, j, fb_px.color.r);
-								fb_px.color.g = dither_o8x8(i, j, fb_px.color.g);
-								fb_px.color.b = dither_o8x8(i, j, fb_px.color.b);
+							img_px.p ^= invert_32b;
+							// Blend it, honoring pixel order (BGR vs. RGB) in the process ;).
+							if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGRA) ||
+							    likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR32)) {
+								fb_px.bgra.color.r =
+								    (uint8_t) DIV255(((img_px.color.r * img_px.color.a) +
+										      (bg_px.bgra.color.r * ainv)));
+								fb_px.bgra.color.g =
+								    (uint8_t) DIV255(((img_px.color.g * img_px.color.a) +
+										      (bg_px.bgra.color.g * ainv)));
+								fb_px.bgra.color.b =
+								    (uint8_t) DIV255(((img_px.color.b * img_px.color.a) +
+										      (bg_px.bgra.color.b * ainv)));
+								// SW dithering
+								if (fbink_cfg->sw_dithering) {
+									fb_px.bgra.color.r =
+									    dither_o8x8(i, j, fb_px.bgra.color.r);
+									fb_px.bgra.color.g =
+									    dither_o8x8(i, j, fb_px.bgra.color.g);
+									fb_px.bgra.color.b =
+									    dither_o8x8(i, j, fb_px.bgra.color.b);
+								}
+							} else {
+								fb_px.rgba.color.r =
+								    (uint8_t) DIV255(((img_px.color.r * img_px.color.a) +
+										      (bg_px.rgba.color.r * ainv)));
+								fb_px.rgba.color.g =
+								    (uint8_t) DIV255(((img_px.color.g * img_px.color.a) +
+										      (bg_px.rgba.color.g * ainv)));
+								fb_px.rgba.color.b =
+								    (uint8_t) DIV255(((img_px.color.b * img_px.color.a) +
+										      (bg_px.rgba.color.b * ainv)));
+								// SW dithering
+								if (fbink_cfg->sw_dithering) {
+									fb_px.rgba.color.r =
+									    dither_o8x8(i, j, fb_px.rgba.color.r);
+									fb_px.rgba.color.g =
+									    dither_o8x8(i, j, fb_px.rgba.color.g);
+									fb_px.rgba.color.b =
+									    dither_o8x8(i, j, fb_px.rgba.color.b);
+								}
 							}
 
 #	pragma GCC diagnostic push
@@ -10125,7 +11460,7 @@ static int
 				}
 			} else {
 				// 24bpp
-				FBInkPixelBGR fb_px;
+				FBInkPixel fb_px;
 				for (unsigned short int j = img_y_off; j < max_height; j++) {
 					for (unsigned short int i = img_x_off; i < max_width; i++) {
 						// NOTE: We should be able to skip rotation hacks at this bpp...
@@ -10136,32 +11471,48 @@ static int
 #	pragma GCC diagnostic push
 #	pragma GCC diagnostic ignored "-Wcast-align"
 						// First, we gobble the full image pixel (all 4 bytes)
-						// cppcheck-suppress unreadVariable ; false-positive (union)
 						img_px.p = *((const uint32_t*) (data + img_scanline_offset) + i);
 #	pragma GCC diagnostic pop
 
 						// Take a shortcut for the most common alpha values (none & full)
 						if (img_px.color.a == 0xFFu) {
 							// Fully opaque, we can blit the image (almost) directly.
+							img_px.p ^= invert_32b;
 							// We do need to handle BGR and honor inversion ;).
-							// cppcheck-suppress unreadVariable ; false-positive (union)
-							img_px.p ^= invert_rgb;
-							// SW dithering
-							if (fbink_cfg->sw_dithering) {
-								fb_px.color.r = dither_o8x8(i, j, img_px.color.r);
-								fb_px.color.g = dither_o8x8(i, j, img_px.color.g);
-								fb_px.color.b = dither_o8x8(i, j, img_px.color.b);
+							if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR24)) {
+								// SW dithering
+								if (fbink_cfg->sw_dithering) {
+									fb_px.bgr.color.r =
+									    dither_o8x8(i, j, img_px.color.r);
+									fb_px.bgr.color.g =
+									    dither_o8x8(i, j, img_px.color.g);
+									fb_px.bgr.color.b =
+									    dither_o8x8(i, j, img_px.color.b);
+								} else {
+									fb_px.bgr.color.r = img_px.color.r;
+									fb_px.bgr.color.g = img_px.color.g;
+									fb_px.bgr.color.b = img_px.color.b;
+								}
 							} else {
-								fb_px.color.r = img_px.color.r;
-								fb_px.color.g = img_px.color.g;
-								fb_px.color.b = img_px.color.b;
+								// SW dithering
+								if (fbink_cfg->sw_dithering) {
+									fb_px.rgb.color.r =
+									    dither_o8x8(i, j, img_px.color.r);
+									fb_px.rgb.color.g =
+									    dither_o8x8(i, j, img_px.color.g);
+									fb_px.rgb.color.b =
+									    dither_o8x8(i, j, img_px.color.b);
+								} else {
+									// Same pixel order
+									fb_px.p = img_px.p;
+								}
 							}
 
 							const size_t fb_pix_offset =
 							    (uint32_t) ((unsigned short int) (i + x_off) << 2U) +
 							    ((unsigned short int) (j + y_off) * fInfo.line_length);
 							// And we write the full pixel to the fb (all 3 bytes)
-							*((uint24_t*) (fbPtr + fb_pix_offset)) = fb_px.p;
+							*((uint24_t*) (fbPtr + fb_pix_offset)) = fb_px.rgb24;
 						} else if (img_px.color.a == 0) {
 							// Transparent! Keep fb as-is.
 						} else {
@@ -10172,28 +11523,54 @@ static int
 							    (uint32_t) ((unsigned short int) (i + x_off) << 2U) +
 							    ((unsigned short int) (j + y_off) * fInfo.line_length);
 							// Again, read the full pixel from the framebuffer (all 3 bytes)
-							FBInkPixelBGR bg_px;
-							bg_px.p = *((uint24_t*) (fbPtr + fb_pix_offset));
+							FBInkPixel bg_px;
+							bg_px.rgb24 = *((uint24_t*) (fbPtr + fb_pix_offset));
 
 							// Don't forget to honor inversion
-							// cppcheck-suppress unreadVariable ; false-positive (union)
-							img_px.p ^= invert_rgb;
+							img_px.p ^= invert_32b;
 							// Blend it, we get our BGR swap in the process ;).
-							fb_px.color.r = (uint8_t) DIV255(
-							    ((img_px.color.r * img_px.color.a) + (bg_px.color.r * ainv)));
-							fb_px.color.g = (uint8_t) DIV255(
-							    ((img_px.color.g * img_px.color.a) + (bg_px.color.g * ainv)));
-							fb_px.color.b = (uint8_t) DIV255(
-							    ((img_px.color.b * img_px.color.a) + (bg_px.color.b * ainv)));
-							// SW dithering
-							if (fbink_cfg->sw_dithering) {
-								fb_px.color.r = dither_o8x8(i, j, fb_px.color.r);
-								fb_px.color.g = dither_o8x8(i, j, fb_px.color.g);
-								fb_px.color.b = dither_o8x8(i, j, fb_px.color.b);
+							if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR24)) {
+								fb_px.bgr.color.r =
+								    (uint8_t) DIV255(((img_px.color.r * img_px.color.a) +
+										      (bg_px.bgr.color.r * ainv)));
+								fb_px.bgr.color.g =
+								    (uint8_t) DIV255(((img_px.color.g * img_px.color.a) +
+										      (bg_px.bgr.color.g * ainv)));
+								fb_px.bgr.color.b =
+								    (uint8_t) DIV255(((img_px.color.b * img_px.color.a) +
+										      (bg_px.bgr.color.b * ainv)));
+								// SW dithering
+								if (fbink_cfg->sw_dithering) {
+									fb_px.bgr.color.r =
+									    dither_o8x8(i, j, fb_px.bgr.color.r);
+									fb_px.bgr.color.g =
+									    dither_o8x8(i, j, fb_px.bgr.color.g);
+									fb_px.bgr.color.b =
+									    dither_o8x8(i, j, fb_px.bgr.color.b);
+								}
+							} else {
+								fb_px.rgb.color.r =
+								    (uint8_t) DIV255(((img_px.color.r * img_px.color.a) +
+										      (bg_px.rgb.color.r * ainv)));
+								fb_px.rgb.color.g =
+								    (uint8_t) DIV255(((img_px.color.g * img_px.color.a) +
+										      (bg_px.rgb.color.g * ainv)));
+								fb_px.rgb.color.b =
+								    (uint8_t) DIV255(((img_px.color.b * img_px.color.a) +
+										      (bg_px.rgb.color.b * ainv)));
+								// SW dithering
+								if (fbink_cfg->sw_dithering) {
+									fb_px.rgb.color.r =
+									    dither_o8x8(i, j, fb_px.rgb.color.r);
+									fb_px.rgb.color.g =
+									    dither_o8x8(i, j, fb_px.rgb.color.g);
+									fb_px.rgb.color.b =
+									    dither_o8x8(i, j, fb_px.rgb.color.b);
+								}
 							}
 
 							// And we write the full blended pixel to the fb (all 3 bytes)
-							*((uint24_t*) (fbPtr + fb_pix_offset)) = fb_px.p;
+							*((uint24_t*) (fbPtr + fb_pix_offset)) = fb_px.rgb24;
 						}
 					}
 				}
@@ -10201,44 +11578,58 @@ static int
 		} else {
 			// No alpha in image, or ignored
 			// We don't care about image alpha in this branch, so we don't even store it.
-			if (likely(!fb_is_24bpp)) {
+			if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGRA) ||
+			    deviceQuirks.pixelFormat == FBINK_PXFMT_RGBA ||
+			    likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR32) ||
+			    deviceQuirks.pixelFormat == FBINK_PXFMT_RGB32) {
 				// 32bpp
-				FBInkPixelBGRA fb_px;
+				FBInkPixel fb_px;
 				// This is essentially a constant in our case...
-				// cppcheck-suppress unreadVariable ; false-positive (union)
-				fb_px.color.a = 0xFFu;
+				fb_px.bgra.color.a = 0xFFu;
 				for (unsigned short int j = img_y_off; j < max_height; j++) {
 					for (unsigned short int i = img_x_off; i < max_width; i++) {
 						// NOTE: Here, req_n is either 4, or 3 if ignore_alpha, so, no shift trickery ;)
-						const size_t  img_pix_offset = (size_t) ((j * req_n * w) + (i * req_n));
-						// Gobble the full image pixel (3 bytes, we don't care about alpha if it's there)
-						FBInkPixelRGB img_px;
-						img_px.p = *((const uint24_t*) &data[img_pix_offset]);
-						// NOTE: Given our typedef trickery, this exactly boils down to a 3 bytes memcpy:
-						//memcpy(&img_px.p, &data[pix_offset], 3 * sizeof(uint8_t));
-
-						// Handle BGR, inversion & SW dithering
-						if (fbink_cfg->sw_dithering) {
-							// cppcheck-suppress unreadVariable ; false-positive (union)
-							fb_px.color.r = dither_o8x8(i, j, img_px.color.r);
-							// cppcheck-suppress unreadVariable ; false-positive (union)
-							fb_px.color.g = dither_o8x8(i, j, img_px.color.g);
-							// cppcheck-suppress unreadVariable ; false-positive (union)
-							fb_px.color.b = dither_o8x8(i, j, img_px.color.b);
-						} else {
-							// cppcheck-suppress unreadVariable ; false-positive (union)
-							fb_px.color.r = img_px.color.r;
-							// cppcheck-suppress unreadVariable ; false-positive (union)
-							fb_px.color.g = img_px.color.g;
-							// cppcheck-suppress unreadVariable ; false-positive (union)
-							fb_px.color.b = img_px.color.b;
+						const size_t   img_pix_offset = (size_t) ((j * req_n * w) + (i * req_n));
+						// Gobble the full image pixel (we don't care about alpha if it's there)
+						FBInkPixelRGBA img_px;
+						// NOTE: Overread in an RGB32 pixel because it's ever so slightly faster than a 3 bytes memcpy.
+						//       Yes, this can overread 1 byte over the data buffer for the final pixel if req_n == 3.
+#	pragma GCC diagnostic push
+#	pragma GCC diagnostic ignored "-Wcast-align"
+						img_px.p = *((const uint32_t*) (data + img_pix_offset));
+#	pragma GCC diagnostic pop
+						// Saturation boost
+						if (fbink_cfg->saturation_boost != 0U) {
+							saturation_boost_hsp(&img_px, sat_boost);
 						}
-						// NOTE: The RGB -> BGR dance precludes us from simply doing a 3 bytes memcpy,
-						//       and our union trickery appears to be faster than packing the pixel
-						//       ourselves with something like:
-						//       fb_px.p = 0xFF<<24U | img_px.color.r<<16U | img_px.color.g<<8U | img_px.color.b;
-						// We *can* do the inversion on the full pixel, though ;).
-						fb_px.p ^= invert_rgb;
+
+						// Handle inversion, BGR swap & SW dithering
+						img_px.p ^= invert_32b;
+						if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGRA) ||
+						    likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR32)) {
+							if (fbink_cfg->sw_dithering) {
+								fb_px.bgra.color.r = dither_o8x8(i, j, img_px.color.r);
+								fb_px.bgra.color.g = dither_o8x8(i, j, img_px.color.g);
+								fb_px.bgra.color.b = dither_o8x8(i, j, img_px.color.b);
+							} else {
+								fb_px.bgra.color.r = img_px.color.r;
+								fb_px.bgra.color.g = img_px.color.g;
+								fb_px.bgra.color.b = img_px.color.b;
+							}
+							// NOTE: The RGB -> BGR dance precludes us from simply doing a 3 bytes memcpy,
+							//       and our union trickery appears to be faster than packing the pixel
+							//       ourselves with something like:
+							//       fb_px.p = 0xFF<<24U | img_px.color.r<<16U | img_px.color.g<<8U | img_px.color.b;
+						} else {
+							if (fbink_cfg->sw_dithering) {
+								fb_px.rgba.color.r = dither_o8x8(i, j, img_px.color.r);
+								fb_px.rgba.color.g = dither_o8x8(i, j, img_px.color.g);
+								fb_px.rgba.color.b = dither_o8x8(i, j, img_px.color.b);
+							} else {
+								// Same pixel order
+								fb_px.p = img_px.p;
+							}
+						}
 
 						// NOTE: Again, assume we can safely skip rotation tweaks
 						const size_t fb_scanline_offset =
@@ -10262,16 +11653,28 @@ static int
 						// NOTE: Given our typedef trickery, this exactly boils down to a 3 bytes memcpy:
 						//memcpy(&img_px.p, &data[pix_offset], 3 * sizeof(uint8_t));
 
-						// Handle BGR, inversion & SW dithering
-						FBInkPixelBGR fb_px;
-						if (fbink_cfg->sw_dithering) {
-							fb_px.color.r = dither_o8x8(i, j, img_px.color.r ^ invert);
-							fb_px.color.g = dither_o8x8(i, j, img_px.color.g ^ invert);
-							fb_px.color.b = dither_o8x8(i, j, img_px.color.b ^ invert);
+						FBInkPixel fb_px;
+						// Handle inversion, BGR & SW dithering
+						img_px.p.u24 ^= invert_24b.u24;
+						if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR24)) {
+							if (fbink_cfg->sw_dithering) {
+								fb_px.bgr.color.r = dither_o8x8(i, j, img_px.color.r);
+								fb_px.bgr.color.g = dither_o8x8(i, j, img_px.color.g);
+								fb_px.bgr.color.b = dither_o8x8(i, j, img_px.color.b);
+							} else {
+								fb_px.bgr.color.r = img_px.color.r;
+								fb_px.bgr.color.g = img_px.color.g;
+								fb_px.bgr.color.b = img_px.color.b;
+							}
 						} else {
-							fb_px.color.r = img_px.color.r ^ invert;
-							fb_px.color.g = img_px.color.g ^ invert;
-							fb_px.color.b = img_px.color.b ^ invert;
+							if (fbink_cfg->sw_dithering) {
+								fb_px.rgb.color.r = dither_o8x8(i, j, img_px.color.r);
+								fb_px.rgb.color.g = dither_o8x8(i, j, img_px.color.g);
+								fb_px.rgb.color.b = dither_o8x8(i, j, img_px.color.b);
+							} else {
+								// Same pixel order
+								fb_px.rgb24 = img_px.p;
+							}
 						}
 
 						// NOTE: Again, assume we can safely skip rotation tweaks
@@ -10279,7 +11682,7 @@ static int
 						    (uint32_t) ((unsigned short int) (i + x_off) << 2U) +
 						    ((unsigned short int) (j + y_off) * fInfo.line_length);
 						// Write the full pixel to the fb (all 3 bytes)
-						*((uint24_t*) (fbPtr + fb_pix_offset)) = fb_px.p;
+						*((uint24_t*) (fbPtr + fb_pix_offset)) = fb_px.rgb24;
 						// NOTE: Again, this should roughly amount to a 3 bytes memcpy,
 						//       although in this instance, GCC generates slightly different code.
 						//memcpy(fbPtr + pix_offset, &fb_px.p, 3 * sizeof(uint8_t));
@@ -10308,20 +11711,24 @@ static int
 					if (img_px.color.a == 0xFFu) {
 						// Fully opaque, we can blit the image (almost) directly.
 						// We do need to handle BGR and honor inversion ;).
-						img_px.p ^= invert_rgb;
+						img_px.p ^= invert_32b;
 						// SW dithering
 						if (fbink_cfg->sw_dithering) {
-							pixel.bgra.color.r = dither_o8x8(i, j, img_px.color.r);
-							pixel.bgra.color.g = dither_o8x8(i, j, img_px.color.g);
-							pixel.bgra.color.b = dither_o8x8(i, j, img_px.color.b);
+							pixel.rgba.color.r = dither_o8x8(i, j, img_px.color.r);
+							pixel.rgba.color.g = dither_o8x8(i, j, img_px.color.g);
+							pixel.rgba.color.b = dither_o8x8(i, j, img_px.color.b);
 						} else {
-							pixel.bgra.color.r = img_px.color.r;
-							pixel.bgra.color.g = img_px.color.g;
-							pixel.bgra.color.b = img_px.color.b;
+							// Same pixel order
+							pixel.p = img_px.p;
 						}
-						// Pack it
-						pixel.rgb565 = pack_rgb565(
-						    pixel.bgra.color.r, pixel.bgra.color.g, pixel.bgra.color.b);
+						// Pack it in the right pixel order
+						if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR565)) {
+							pixel.rgb565 = pack_bgr565(
+							    pixel.rgba.color.r, pixel.rgba.color.g, pixel.rgba.color.b);
+						} else {
+							pixel.rgb565 = pack_rgb565(
+							    pixel.rgba.color.r, pixel.rgba.color.g, pixel.rgba.color.b);
+						}
 
 						coords.x = (unsigned short int) (i + x_off);
 						coords.y = (unsigned short int) (j + y_off);
@@ -10332,31 +11739,66 @@ static int
 					} else {
 						// Alpha blending...
 						const uint8_t ainv = img_px.color.a ^ 0xFFu;
+						// Don't forget to honor inversion
+						img_px.p          ^= invert_32b;
 
 						coords.x = (unsigned short int) (i + x_off);
 						coords.y = (unsigned short int) (j + y_off);
 						(*fxpRotateCoords)(&coords);
 						FBInkPixel bg_px;
-						get_pixel_RGB565(&coords, &bg_px);
 
-						// Don't forget to honor inversion
-						img_px.p ^= invert_rgb;
-						// Blend it, we get our BGR swap in the process ;).
-						pixel.bgra.color.r = (uint8_t) DIV255(
-						    ((img_px.color.r * img_px.color.a) + (bg_px.bgra.color.r * ainv)));
-						pixel.bgra.color.g = (uint8_t) DIV255(
-						    ((img_px.color.g * img_px.color.a) + (bg_px.bgra.color.g * ainv)));
-						pixel.bgra.color.b = (uint8_t) DIV255(
-						    ((img_px.color.b * img_px.color.a) + (bg_px.bgra.color.b * ainv)));
-						// SW dithering
-						if (fbink_cfg->sw_dithering) {
-							pixel.bgra.color.r = dither_o8x8(i, j, pixel.bgra.color.r);
-							pixel.bgra.color.g = dither_o8x8(i, j, pixel.bgra.color.g);
-							pixel.bgra.color.b = dither_o8x8(i, j, pixel.bgra.color.b);
+						// Deal with pixel order
+						if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR565)) {
+							get_pixel_BGR565(&coords, &bg_px);
+
+							// Blend it ;).
+							pixel.bgra.color.r =
+							    (uint8_t) DIV255(((img_px.color.r * img_px.color.a) +
+									      (bg_px.bgra.color.r * ainv)));
+							pixel.bgra.color.g =
+							    (uint8_t) DIV255(((img_px.color.g * img_px.color.a) +
+									      (bg_px.bgra.color.g * ainv)));
+							pixel.bgra.color.b =
+							    (uint8_t) DIV255(((img_px.color.b * img_px.color.a) +
+									      (bg_px.bgra.color.b * ainv)));
+							// SW dithering
+							if (fbink_cfg->sw_dithering) {
+								pixel.bgra.color.r =
+								    dither_o8x8(i, j, pixel.bgra.color.r);
+								pixel.bgra.color.g =
+								    dither_o8x8(i, j, pixel.bgra.color.g);
+								pixel.bgra.color.b =
+								    dither_o8x8(i, j, pixel.bgra.color.b);
+							}
+							// Pack it
+							pixel.rgb565 = pack_bgr565(
+							    pixel.bgra.color.r, pixel.bgra.color.g, pixel.bgra.color.b);
+						} else {
+							get_pixel_RGB565(&coords, &bg_px);
+
+							// Blend it ;).
+							pixel.rgba.color.r =
+							    (uint8_t) DIV255(((img_px.color.r * img_px.color.a) +
+									      (bg_px.rgba.color.r * ainv)));
+							pixel.rgba.color.g =
+							    (uint8_t) DIV255(((img_px.color.g * img_px.color.a) +
+									      (bg_px.rgba.color.g * ainv)));
+							pixel.rgba.color.b =
+							    (uint8_t) DIV255(((img_px.color.b * img_px.color.a) +
+									      (bg_px.rgba.color.b * ainv)));
+							// SW dithering
+							if (fbink_cfg->sw_dithering) {
+								pixel.rgba.color.r =
+								    dither_o8x8(i, j, pixel.rgba.color.r);
+								pixel.rgba.color.g =
+								    dither_o8x8(i, j, pixel.rgba.color.g);
+								pixel.rgba.color.b =
+								    dither_o8x8(i, j, pixel.rgba.color.b);
+							}
+							// Pack it
+							pixel.rgb565 = pack_rgb565(
+							    pixel.rgba.color.r, pixel.rgba.color.g, pixel.rgba.color.b);
 						}
-						// Pack it
-						pixel.rgb565 = pack_rgb565(
-						    pixel.bgra.color.r, pixel.bgra.color.g, pixel.bgra.color.b);
 
 						put_pixel_RGB565(&coords, &pixel);
 					}
@@ -10371,17 +11813,22 @@ static int
 					const size_t pix_offset = (size_t) ((j * req_n * w) + (i * req_n));
 					// SW dithering
 					if (fbink_cfg->sw_dithering) {
-						pixel.bgra.color.r = dither_o8x8(i, j, data[pix_offset + 0U] ^ invert);
-						pixel.bgra.color.g = dither_o8x8(i, j, data[pix_offset + 1U] ^ invert);
-						pixel.bgra.color.b = dither_o8x8(i, j, data[pix_offset + 2U] ^ invert);
+						pixel.rgba.color.r = dither_o8x8(i, j, data[pix_offset + 0U] ^ invert);
+						pixel.rgba.color.g = dither_o8x8(i, j, data[pix_offset + 1U] ^ invert);
+						pixel.rgba.color.b = dither_o8x8(i, j, data[pix_offset + 2U] ^ invert);
 					} else {
-						pixel.bgra.color.r = data[pix_offset + 0U] ^ invert;
-						pixel.bgra.color.g = data[pix_offset + 1U] ^ invert;
-						pixel.bgra.color.b = data[pix_offset + 2U] ^ invert;
+						pixel.rgba.color.r = data[pix_offset + 0U] ^ invert;
+						pixel.rgba.color.g = data[pix_offset + 1U] ^ invert;
+						pixel.rgba.color.b = data[pix_offset + 2U] ^ invert;
 					}
-					// Pack it
-					pixel.rgb565 =
-					    pack_rgb565(pixel.bgra.color.r, pixel.bgra.color.g, pixel.bgra.color.b);
+					// Pack it in the right pixel order
+					if (likely(deviceQuirks.pixelFormat == FBINK_PXFMT_BGR565)) {
+						pixel.rgb565 = pack_bgr565(
+						    pixel.rgba.color.r, pixel.rgba.color.g, pixel.rgba.color.b);
+					} else {
+						pixel.rgb565 = pack_rgb565(
+						    pixel.rgba.color.r, pixel.rgba.color.g, pixel.rgba.color.b);
+					}
 
 					FBInkCoordinates coords;
 					coords.x = (unsigned short int) (i + x_off);
@@ -10582,7 +12029,7 @@ cleanup:
 // Draw raw (supposedly image) data on screen
 int
     fbink_print_raw_data(int fbfd                              UNUSED_BY_MINIMAL,
-			 unsigned char* restrict data          UNUSED_BY_MINIMAL,
+			 const unsigned char* restrict data    UNUSED_BY_MINIMAL,
 			 const int w                           UNUSED_BY_MINIMAL,
 			 const int h                           UNUSED_BY_MINIMAL,
 			 const size_t len                      UNUSED_BY_MINIMAL,
@@ -10622,9 +12069,12 @@ int
 
 	LOG("Requested %d color channels, supplied data had %d", req_n, n);
 
+	// Local pointer we'll end up passing to draw_image, as we may need to process the input data...
+	const unsigned char* restrict img_data = NULL;
+
 	// Was scaling requested?
-	unsigned char* restrict sdata = NULL;
-	bool want_scaling             = false;
+	unsigned char* restrict scaled_data = NULL;
+	bool want_scaling                   = false;
 	if (fbink_cfg->scaled_width != 0 || fbink_cfg->scaled_height != 0) {
 		LOG("Image scaling requested!");
 		want_scaling = true;
@@ -10644,21 +12094,22 @@ int
 
 	// If there's a mismatch between the components in the input data vs. what the fb expects,
 	// re-interleave the data w/ stbi's help...
-	unsigned char* restrict imgdata = NULL;
+	unsigned char* restrict converted_data = NULL;
 	if (req_n != n) {
 		LOG("Converting from %d components to the requested %d", n, req_n);
 		// NOTE: stbi__convert_format will *always* free the input buffer, which we do NOT want here...
 		//       Which is why we're using a tweaked internal copy, which does not free ;).
-		imgdata = img_convert_px_format(data, n, req_n, w, h);
-		if (imgdata == NULL) {
+		converted_data = img_convert_px_format(data, n, req_n, w, h);
+		if (converted_data == NULL) {
 			WARN("Failed to re-interleave input data in a suitable format");
 			rv = ERRCODE(EXIT_FAILURE);
 			goto cleanup;
 		}
+		img_data = converted_data;
 	} else {
 		// We can use the input buffer as-is :)
 		LOG("No conversion needed, using the input buffer directly");
-		imgdata = data;
+		img_data = data;
 	}
 
 	// Scale it w/ QImageScale, if requested
@@ -10715,14 +12166,15 @@ int
 
 		LOG("Scaling image data from %dx%d to %hux%hu . . .", w, h, scaled_width, scaled_height);
 
-		sdata = qSmoothScaleImage(imgdata, w, h, req_n, fbink_cfg->ignore_alpha, scaled_width, scaled_height);
-		if (sdata == NULL) {
+		scaled_data =
+		    qSmoothScaleImage(img_data, w, h, req_n, fbink_cfg->ignore_alpha, scaled_width, scaled_height);
+		if (scaled_data == NULL) {
 			PFWARN("Failed to resize image");
 			return ERRCODE(EXIT_FAILURE);
 		}
 
 		// We're drawing the scaled data, at the requested scaled resolution
-		if (draw_image(fbfd, sdata, scaled_width, scaled_height, n, req_n, x_off, y_off, fbink_cfg) !=
+		if (draw_image(fbfd, scaled_data, scaled_width, scaled_height, n, req_n, x_off, y_off, fbink_cfg) !=
 		    EXIT_SUCCESS) {
 			PFWARN("Failed to display image data on screen");
 			rv = ERRCODE(EXIT_FAILURE);
@@ -10730,7 +12182,7 @@ int
 		}
 	} else {
 		// We should now be able to draw that on screen, knowing that it probably won't horribly implode ;p
-		if (draw_image(fbfd, imgdata, w, h, n, req_n, x_off, y_off, fbink_cfg) != EXIT_SUCCESS) {
+		if (draw_image(fbfd, img_data, w, h, n, req_n, x_off, y_off, fbink_cfg) != EXIT_SUCCESS) {
 			PFWARN("Failed to display image data on screen");
 			rv = ERRCODE(EXIT_FAILURE);
 			goto cleanup;
@@ -10740,11 +12192,9 @@ int
 	// Cleanup
 cleanup:
 	// If we created an intermediary buffer ourselves, free it.
-	if (req_n != n) {
-		stbi_image_free(imgdata);
-	}
+	free(converted_data);
 	// And the scaled buffer
-	free(sdata);
+	free(scaled_data);
 
 	return rv;
 #else
@@ -10783,7 +12233,7 @@ int
 		free(dump->data);
 		dump->data = NULL;
 		// Reset the crop settings
-		dump->clip = (const FBInkRect){ 0U };
+		dump->clip = (const FBInkRect) { 0U };
 	}
 	// Start by allocating enough memory for a full dump of the visible screen...
 	dump->stride = fInfo.line_length;
@@ -11485,3 +12935,5 @@ void
 #include "fbink_button_scan.c"
 // Contains the Kobo only native/canonical rotation conversion helpers
 #include "fbink_rota_quirks.c"
+// Contains the input device scanner & classifier
+#include "fbink_input_scan.c"

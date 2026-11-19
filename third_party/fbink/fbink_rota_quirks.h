@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -56,11 +56,27 @@ static orientation_t linuxfb_rotate_to_einkfb_orientation(uint32_t);
 #endif
 
 #ifdef FBINK_FOR_KOBO
+static int kobo_mtk_invert_fb(bool);
 // Custom constants for accelerometer translations
 #	define GYRO_STATE_UNKNOWN             -1
 #	define GYRO_STATE_FACE_UP             -2
 #	define GYRO_STATE_FACE_DOWN           -3
 #	define GYRO_STATE_OUTSIDE_CONSTRAINTS -4
+
+static int
+    str_ends_with(const char* str, const char* suffix)
+{
+	size_t len        = strlen(str);
+	size_t suffix_len = strlen(suffix);
+
+	return len >= suffix_len && !memcmp(str + len - suffix_len, suffix, suffix_len);
+}
+
+static int
+    is_hwtcon(const struct dirent* dir)
+{
+	return str_ends_with(dir->d_name, "hwtcon");
+}
 #endif    // FBINK_FOR_KOBO
 
 #endif

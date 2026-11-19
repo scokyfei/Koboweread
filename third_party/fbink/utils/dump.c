@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -91,9 +91,9 @@ int
 	int rv = EXIT_SUCCESS;
 
 	// Init FBInk
-	int fbfd = -1;
+	int fbfd = fbink_open();
 	// Open framebuffer and keep it around, then setup globals.
-	if ((fbfd = fbink_open()) == ERRCODE(EXIT_FAILURE)) {
+	if (fbfd == ERRCODE(EXIT_FAILURE)) {
 		fprintf(stderr, "Failed to open the framebuffer, aborting . . .\n");
 		rv = ERRCODE(EXIT_FAILURE);
 		goto cleanup;
@@ -185,11 +185,10 @@ int
 		fbink_wait_for_complete(fbfd, LAST_MARKER);
 	}
 	// Forget about the crop for the other tests
-	dump.clip = (const FBInkRect){ 0U };
+	dump.clip = (const FBInkRect) { 0U };
 
 	// Restore, this time with a negative L + T crop
 	fprintf(stdout, "[06b-] RESTORE w/ (-) L+T CROP\n");
-	// cppcheck-suppress redundantAssignment ; true, but the previous clear is kept for clarity
 	dump.clip      = dump.area;
 	dump.clip.left = (unsigned short int) MAX(0, dump.clip.left - 25);
 	//dump.clip.width -= 25;	// Not strictly necessary, will be computed when building the intersection rectangle
@@ -204,10 +203,9 @@ int
 		fbink_wait_for_complete(fbfd, LAST_MARKER);
 	}
 	// Forget about the crop for the other tests
-	dump.clip = (const FBInkRect){ 0U };
+	dump.clip = (const FBInkRect) { 0U };
 
 	// Restore, this time with a positive R + B crop
-	// cppcheck-suppress redundantAssignment ; ditto
 	dump.clip        = dump.area;
 	dump.clip.width  = (unsigned short int) MAX(0, dump.clip.width - 25);
 	dump.clip.height = (unsigned short int) MAX(0, dump.clip.height - 30);
@@ -221,10 +219,9 @@ int
 		fbink_wait_for_complete(fbfd, LAST_MARKER);
 	}
 	// Forget about the crop for the other tests
-	dump.clip = (const FBInkRect){ 0U };
+	dump.clip = (const FBInkRect) { 0U };
 
 	// Restore, this time with a negative R + B crop (i.e., the overlap will match the full dump area)
-	// cppcheck-suppress redundantAssignment ; ditto
 	dump.clip        = dump.area;
 	dump.clip.width  = (unsigned short int) MIN(dump.clip.width + 25U, fbink_state.screen_width);
 	dump.clip.height = (unsigned short int) MIN(dump.clip.height + 30U, fbink_state.screen_height);
@@ -238,10 +235,9 @@ int
 		fbink_wait_for_complete(fbfd, LAST_MARKER);
 	}
 	// Forget about the crop for the other tests
-	dump.clip = (const FBInkRect){ 0U };
+	dump.clip = (const FBInkRect) { 0U };
 
 	// Restore, this time with a crop on all sides
-	// cppcheck-suppress redundantAssignment ; ditto
 	dump.clip        = dump.area;
 	dump.clip.left   = (unsigned short int) MIN(dump.clip.left + 15U, fbink_state.screen_width);
 	dump.clip.width  = (unsigned short int) MAX(0, dump.clip.width - 15);
@@ -259,10 +255,9 @@ int
 		fbink_wait_for_complete(fbfd, LAST_MARKER);
 	}
 	// Forget about the crop for the other tests
-	dump.clip = (const FBInkRect){ 0U };
+	dump.clip = (const FBInkRect) { 0U };
 
 	// This should fail to restore (no overlap)
-	// cppcheck-suppress redundantAssignment ; ditto
 	dump.clip = dump.area;
 	dump.clip.left =
 	    (unsigned short int) MIN((unsigned short int) (dump.clip.left + dump.area.width), fbink_state.screen_width);
@@ -275,7 +270,7 @@ int
 		goto cleanup;
 	}
 	// Forget about the crop for the other tests
-	dump.clip = (const FBInkRect){ 0U };
+	dump.clip = (const FBInkRect) { 0U };
 
 	// Now, for something slightly crazy, which I don't necessarily recommend relying on,
 	// restore, but at a different position.

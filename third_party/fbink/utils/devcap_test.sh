@@ -35,6 +35,9 @@ eval "$(fbink -e)"
 # Here we go...
 echo "* Starting tests on $(date) using FBInk ${FBINK_VERSION}" >> "${DEVCAP_LOG}"
 
+# SIGSTOP GUI stuff
+killall -q -STOP nickel plato reader.lua
+
 # Start from a blank slate
 fbink -q -c -f -w
 
@@ -44,9 +47,24 @@ echo "Running FW $(cut -f3 -d',' /mnt/onboard/.kobo/version) on Linux $(uname -r
 separator
 
 # Dump the NTX HWConfig block
-header "HWConfig"
-ntx_hwconfig -s /dev/mmcblk0 >> "${DEVCAP_LOG}" 2>/dev/null
-separator
+if [ -e "/dev/disk/by-partlabel/hwcfg" ] && [ "$(dd if=/dev/disk/by-partlabel/hwcfg bs=512 skip=1 count=1 2>/dev/null | head -c 9)" = "HW CONFIG" ] ; then
+	# Modern variant
+	header "HWConfig (partlabel)"
+	ntx_hwconfig -S 1 /dev/disk/by-partlabel/hwcfg >> "${DEVCAP_LOG}" 2>/dev/null
+	separator
+elif [ "$(dd if=/dev/mmcblk0 bs=512 skip=1024 count=1 2>/dev/null | head -c 9)" = "HW CONFIG" ] ; then
+	header "HWConfig (Legacy)"
+	ntx_hwconfig -s /dev/mmcblk0 >> "${DEVCAP_LOG}" 2>/dev/null
+	separator
+elif [ -e "/dev/mmcblk0p6" ] && [ "$(dd if=/dev/mmcblk0p6 bs=512 skip=1 count=1 2>/dev/null | head -c 9)" = "HW CONFIG" ] ; then
+	# MTK variant
+	header "HWConfig (p6)"
+	ntx_hwconfig -S 1 /dev/mmcblk0p6 >> "${DEVCAP_LOG}" 2>/dev/null
+	separator
+else
+	header "Couldn't find a HWConfig tag?!"
+	separator
+fi
 
 # List input devices
 header "Input devices"
@@ -54,10 +72,16 @@ ls -lash /dev/input/by-path >> "${DEVCAP_LOG}" 2>/dev/null
 separator
 ls -lash /dev/input >> "${DEVCAP_LOG}" 2>/dev/null
 separator
+cat /proc/bus/input/devices >> "${DEVCAP_LOG}" 2>/dev/null
+separator
+input_scan >> "${DEVCAP_LOG}" 2>&1
+separator
 
 # List backlights
 header "Backlights"
 ls -lash /sys/class/backlight >> "${DEVCAP_LOG}" 2>/dev/null
+separator
+ls -lashL /sys/class/backlight/* >> "${DEVCAP_LOG}" 2>/dev/null
 separator
 
 # List LEDs
@@ -65,8 +89,11 @@ header "LEDs"
 ls -lash /sys/class/leds >> "${DEVCAP_LOG}" 2>/dev/null
 separator
 
+# List battery & ac sysfs entries
 header "Power"
 ls -lash /sys/class/power_supply >> "${DEVCAP_LOG}" 2>/dev/null
+separator
+ls -lashL /sys/class/power_supply/*/* >> "${DEVCAP_LOG}" 2>/dev/null
 separator
 
 # Start by dumping the full fb state
@@ -79,7 +106,7 @@ header "FBInk"
 fbink -v -w -f -Mm "Hello World" >> "${DEVCAP_LOG}" 2>&1
 separator
 
-# Then say hello
+# Dump the FBInk state
 header "FBInk state"
 fbink -e | tr ';' '\n' >> "${DEVCAP_LOG}" 2>&1
 separator
@@ -122,9 +149,9 @@ fbgrab "devcap_CCW.png" >/dev/null 2>&1
 echo -e "\n" >> "${DEVCAP_LOG}"
 separator
 
-# Reset to UpRight
+# Reset to UpRight (via -R UR, instead of the (deprecated) -r -1 used above)
 header "Reset to UR"
-fbdepth -r -1 >> "${DEVCAP_LOG}" 2>&1
+fbdepth -R UR >> "${DEVCAP_LOG}" 2>&1
 separator
 
 # Check uptime vs. epoch for input timestamps
@@ -144,12 +171,13 @@ echo "Screengrab saved to ${DEVCAP_PIC}"
 echo "See https://github.com/NiLuJe/FBInk/blob/master/utils/devcap_expected_results.png for the expected *on-screen* result".
 header "EvTest"
 echo "Please tap the top-left corner of the screen in the next 10s!"
+TOUCH_DEV="$(input_scan -p -m touchscreen | cut -f1 -d',')"
 (
-	if [ -e "/dev/input/by-path/platform-1-0010-event" ] ; then
-		evtest "/dev/input/by-path/platform-1-0010-event" >> "${DEVCAP_LOG}" 2>&1
-	elif [ -e "/dev/input/by-path/platform-0-0010-event" ] ; then
-		evtest "/dev/input/by-path/platform-0-0010-event" >> "${DEVCAP_LOG}" 2>&1
+	if [ -e "${TOUCH_DEV}" ] ; then
+		evtest "${TOUCH_DEV}" >> "${DEVCAP_LOG}" 2>&1
 	else
+		echo "Failed to auto-detect input device, falling back to /dev/input/event1" >> "${DEVCAP_LOG}"
+		echo "" >> "${DEVCAP_LOG}"
 		evtest "/dev/input/event1" >> "${DEVCAP_LOG}" 2>&1
 	fi
 ) &
@@ -169,3 +197,6 @@ echo "Results compiled in ${DEVCAP_LOG}"
 # Tar it up in the PWD, too
 tar -cvzf "${PWD}"/Kobo-DevCap-Results.tar.gz "${DEVCAP_LOG}" devcap_*.png
 echo "Results archived in Kobo-DevCap-Results.tar.gz"
+
+# Resume GUI stuff
+killall -q -CONT nickel plato reader.lua

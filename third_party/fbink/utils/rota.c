@@ -1,6 +1,6 @@
 /*
 	FBInk: FrameBuffer eInker, a library to print text & images to an eInk Linux framebuffer
-	Copyright (C) 2018-2022 NiLuJe <ninuje@gmail.com>
+	Copyright (C) 2018-2024 NiLuJe <ninuje@gmail.com>
 	SPDX-License-Identifier: GPL-3.0-or-later
 
 	----
@@ -73,7 +73,7 @@ static void
 static void
     do_eet(int rota)
 {
-	const struct timespec zzz = { 0L, 250000000L };
+	const struct timespec zzz = { 0L, 250 * 1e+6 };
 
 	set_fbinfo(rota);
 	nanosleep(&zzz, NULL);

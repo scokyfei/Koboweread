@@ -1,4 +1,4 @@
--- WeRead 1.8.8 for Kobo Libra 2: installer and launcher entry.
+-- WeRead 1.8.8 for Kobo Libra 2 / Libra Colour: installer and launcher entry.
 -- Not installed yet: the menu offers the installation (payload/install.sh,
 -- run in the background, progress shown from install.progress). Installed
 -- (/mnt/onboard/.adds/kobo-weread-home/installed): the launcher menu from
@@ -208,7 +208,7 @@ function Installer:addToMainMenu(items)
                 end
             end },
             { text = "说明", callback = function()
-                UIManager:show(InfoMessage:new { text = "适用于 Kobo Libra 2（固件 4.34.20097 或 4.38.23852）上的 KOReader。安装后在本菜单启动 Android 启动器，再打开微信读书。\n\n安装位置：" .. base .. "\n微信读书需要联网，首次使用要同意协议并用微信扫码登录。", timeout = 20 })
+                UIManager:show(InfoMessage:new { text = "适用于 Kobo Libra 2（固件 4.34.20097 或 4.38.23852）或 Libra Colour（固件 4.42.23303）上的 KOReader。安装后在本菜单启动 Android 启动器，再打开微信读书。\n\n安装位置：" .. base .. "\n微信读书需要联网，首次使用要同意协议并用微信扫码登录。", timeout = 20 })
             end },
         },
     }
